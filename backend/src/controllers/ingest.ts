@@ -15,6 +15,7 @@ const ALLOWED_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'ima
 const IMAGE_INPUT_TYPES = new Set(['image', 'image_base64', 'imagebase64']);
 const URL_INPUT_TYPES = new Set(['url', 'link', 'web_url', 'weburl']);
 const TEXT_INPUT_TYPES = new Set(['text', 'raw_text', 'rawtext']);
+
 const DATA_URL_REGEX = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i;
 
 class IngestError extends Error {
@@ -186,7 +187,6 @@ export const handleIngest = async (req: Request, res: Response): Promise<void> =
                 status: 'success',
                 data: {
                     ...mockAnalysis,
-                    ocrText,
                     normalizedPayload: {
                         inputType: 'image',
                         text: ocrText,
