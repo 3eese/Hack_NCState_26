@@ -47,6 +47,114 @@ const getDomainFromUrl = (url: string): string => {
   }
 };
 
+const clampScore = (value: unknown, fallback = 50): number => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) {
+    return fallback;
+  }
+  return Math.max(0, Math.min(100, Math.round(num)));
+};
+
+const ensureStringArray = (value: unknown): string[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+};
+
+const normalizeResultData = (raw: unknown, mode: Mode): ApiResultData => {
+  const record = (raw ?? {}) as Record<string, unknown>;
+
+  if (typeof record.veracityIndex === "number" || typeof record.veracityIndex === "string") {
+    return {
+      mode,
+      inputType: (record.inputType as InputType) ?? "text",
+      veracityIndex: clampScore(record.veracityIndex, 50),
+      verdict: typeof record.verdict === "string" ? record.verdict : "",
+      summary: typeof record.summary === "string" ? record.summary : "",
+      extractedText: typeof record.extractedText === "string" ? record.extractedText : "",
+      keyFindings: ensureStringArray(record.keyFindings),
+      fakeParts: ensureStringArray(record.fakeParts),
+      recommendedActions: ensureStringArray(record.recommendedActions),
+      evidenceSources: Array.isArray(record.evidenceSources)
+        ? (record.evidenceSources as ApiEvidence[]).filter((item) => item && typeof item.title === "string" && typeof item.url === "string" && typeof item.snippet === "string")
+        : [],
+      model: typeof record.model === "string" ? record.model : "unknown",
+    };
+  }
+
+  const phishing = (record.phishingRisk ?? {}) as Record<string, unknown>;
+  const pii = (record.piiRisk ?? {}) as Record<string, unknown>;
+  const privacy = (record.privacyRisk ?? {}) as Record<string, unknown>;
+
+  const phishingScore = clampScore(phishing.score, 0);
+  const piiScore = clampScore(pii.score, 0);
+  const privacyScore = clampScore(privacy.score, 0);
+  const overall = clampScore(Math.round((phishingScore + piiScore + privacyScore) / 3), 50);
+
+  const flags = Array.isArray(phishing.flags) ? phishing.flags as Array<Record<string, unknown>> : [];
+  const lookalikes = Array.isArray(phishing.lookalikeMatches) ? phishing.lookalikeMatches as Array<Record<string, unknown>> : [];
+  const detections = Array.isArray(pii.detections) ? pii.detections as Array<Record<string, unknown>> : [];
+  const trackerMatches = Array.isArray(privacy.trackerMatches) ? privacy.trackerMatches as Array<Record<string, unknown>> : [];
+
+  const keyFindings: string[] = [];
+  if (flags.length > 0) {
+    keyFindings.push(...flags.slice(0, 4).map((f) => `${String(f.type ?? "Risk")}: ${String(f.description ?? "Suspicious signal detected.")}`));
+  }
+  if (lookalikes.length > 0) {
+    keyFindings.push(...lookalikes.slice(0, 3).map((m) => `Lookalike domain risk: ${String(m.hostname ?? m.url ?? "unknown host")}`));
+  }
+  if (detections.length > 0) {
+    keyFindings.push(...detections.slice(0, 3).map((d) => `PII detected: ${String(d.type ?? "data")} (${String(d.count ?? 1)})`));
+  }
+  if (trackerMatches.length > 0) {
+    keyFindings.push(`Tracker activity found across ${trackerMatches.length} resource match(es).`);
+  }
+
+  const fakeParts: string[] = [];
+  fakeParts.push(...flags.slice(0, 3).map((f) => String(f.description ?? "Suspicious message pattern.")));
+  fakeParts.push(...lookalikes.slice(0, 3).map((m) => String(m.reason ?? "Domain appears suspicious.")));
+
+  const evidenceSources: ApiEvidence[] = trackerMatches
+    .slice(0, 8)
+    .map((m) => {
+      const url = typeof m.resourceUrl === "string" ? m.resourceUrl : "";
+      const domain = typeof m.trackerDomain === "string" ? m.trackerDomain : "tracker";
+      return {
+        title: `Tracker match: ${domain}`,
+        url: url || "https://example.com",
+        snippet: `Hostname: ${String(m.hostname ?? "unknown")} | Category: ${String(m.category ?? "unknown")}`,
+      };
+    })
+    .filter((e) => e.url.startsWith("http"));
+
+  const summary =
+    `Phishing risk ${phishingScore}/100, PII risk ${piiScore}/100, privacy risk ${privacyScore}/100.` +
+    (typeof pii.maskedText === "string" && pii.maskedText.trim().length > 0
+      ? " Sensitive data was masked in detected text."
+      : "");
+
+  const recommendedActions = [
+    "Do not click unknown links or share verification codes.",
+    "Verify sender domains and website URLs via official channels.",
+    "Use MFA and rotate passwords if you interacted with suspicious content.",
+  ];
+
+  return {
+    mode: "protect",
+    inputType: "text",
+    veracityIndex: overall,
+    verdict: overall >= 65 ? "High Risk" : overall >= 35 ? "Medium Risk" : "Low Risk",
+    summary,
+    extractedText: typeof pii.maskedText === "string" ? pii.maskedText : "",
+    keyFindings: keyFindings.length > 0 ? keyFindings : ["No specific risk indicators returned."],
+    fakeParts: fakeParts.length > 0 ? fakeParts : ["No explicit suspicious segment was identified."],
+    recommendedActions,
+    evidenceSources,
+    model: "protect-heuristics",
+  };
+};
+
 const Results = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -92,7 +200,7 @@ const Results = () => {
         }
 
         if (mounted) {
-          setResult(payload.data as ApiResultData);
+          setResult(normalizeResultData(payload.data, submission.mode));
         }
       } catch (err) {
         if (mounted) {
