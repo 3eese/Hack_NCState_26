@@ -26,6 +26,13 @@ app.use(express.json({ limit: JSON_BODY_LIMIT })); // Accept larger payloads for
 app.use(express.urlencoded({ extended: true, limit: JSON_BODY_LIMIT }));
 
 // Define Routes mapping to your System Design
+app.get('/health', (_req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString()
+    });
+});
 app.post('/api/ingest', handleIngest);
 app.post('/api/verify', handleVerify);
 app.post('/api/protect', handleProtect);

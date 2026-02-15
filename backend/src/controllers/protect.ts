@@ -1,4 +1,6 @@
 import type { Request, Response } from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
 import { analyzeInputWithGemini, GeminiRequestError } from '../lib/gemini';
 
 const normalizeInputType = (value: unknown): 'text' | 'url' | 'image' | null => {
@@ -18,12 +20,15 @@ type ProtectRequestBody = {
     content?: unknown;
     text?: unknown;
     url?: unknown;
+    pageUrl?: unknown;
+    resources?: unknown;
     normalizedPayload?: {
         text?: unknown;
         url?: {
             input?: unknown;
             final?: unknown;
         };
+        resources?: unknown;
     };
 };
 
@@ -46,6 +51,20 @@ type PiiDetection = {
     examples: string[];
 };
 
+type TrackerEntry = {
+    domain: string;
+    owner?: string;
+    category?: string;
+};
+
+type TrackerMatch = {
+    resourceUrl: string;
+    hostname: string;
+    trackerDomain: string;
+    owner?: string;
+    category?: string;
+};
+
 class ProtectError extends Error {
     status: number;
 
@@ -63,6 +82,27 @@ const normalizeWhitespace = (value: string): string =>
         .trim();
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
+const readStringArray = (value: unknown, maxItems = 200): string[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const items: string[] = [];
+    for (const entry of value) {
+        if (typeof entry !== 'string') {
+            continue;
+        }
+        const trimmed = entry.trim();
+        if (!trimmed) {
+            continue;
+        }
+        items.push(trimmed);
+        if (items.length >= maxItems) {
+            break;
+        }
+    }
+    return items;
+};
 
 const readTextFromBody = (body: ProtectRequestBody): string => {
     const candidates = [body.text, body.content, body.normalizedPayload?.text];
@@ -85,7 +125,11 @@ const normalizeUrl = (rawUrl: string): string | null => {
     if (!trimmed) {
         return null;
     }
-    const withScheme = trimmed.startsWith('http://') || trimmed.startsWith('https://') ? trimmed : `https://${trimmed}`;
+    const withScheme = trimmed.startsWith('//')
+        ? `https:${trimmed}`
+        : trimmed.startsWith('http://') || trimmed.startsWith('https://')
+            ? trimmed
+            : `https://${trimmed}`;
     try {
         return new URL(withScheme).toString();
     } catch {
@@ -126,6 +170,50 @@ const collectUrls = (body: ProtectRequestBody, text: string): string[] => {
         }
     }
     return normalized;
+};
+
+const collectResourceUrls = (body: ProtectRequestBody, text: string): string[] => {
+    const candidates: string[] = [];
+    const resources = readStringArray(body.resources);
+    const normalizedResources = readStringArray(body.normalizedPayload?.resources);
+    candidates.push(...resources, ...normalizedResources);
+
+    if (candidates.length === 0) {
+        candidates.push(...extractUrlsFromText(text));
+    } else {
+        candidates.push(...extractUrlsFromText(text));
+    }
+
+    const normalized: string[] = [];
+    for (const candidate of candidates) {
+        const normalizedUrl = normalizeUrl(candidate);
+        if (!normalizedUrl) {
+            continue;
+        }
+        if (!normalized.includes(normalizedUrl)) {
+            normalized.push(normalizedUrl);
+        }
+    }
+    return normalized;
+};
+
+const resolvePrimaryUrl = (body: ProtectRequestBody, fallbackUrls: string[]): string | null => {
+    const direct = [
+        body.pageUrl,
+        body.url,
+        body.normalizedPayload?.url?.final,
+        body.normalizedPayload?.url?.input
+    ];
+    for (const candidate of direct) {
+        if (typeof candidate !== 'string') {
+            continue;
+        }
+        const normalized = normalizeUrl(candidate);
+        if (normalized) {
+            return normalized;
+        }
+    }
+    return fallbackUrls[0] ?? null;
 };
 
 const URGENCY_PATTERNS = [
@@ -389,6 +477,165 @@ const buildLookalikeMatches = (urls: string[]): LookalikeMatch[] => {
     return unique;
 };
 
+const FALLBACK_TRACKER_DOMAINS = [
+    'google-analytics.com',
+    'googletagmanager.com',
+    'doubleclick.net',
+    'facebook.net',
+    'connect.facebook.net',
+    'hotjar.com',
+    'segment.com',
+    'mixpanel.com',
+    'amplitude.com',
+    'clarity.ms'
+];
+
+const normalizeDomain = (value: string): string | null => {
+    if (!value) {
+        return null;
+    }
+    const trimmed = value.trim().toLowerCase();
+    if (!trimmed) {
+        return null;
+    }
+    const withoutScheme = trimmed.replace(/^https?:\/\//, '').replace(/^www\./, '');
+    const domain = withoutScheme.split('/')[0]?.trim() ?? '';
+    return domain || null;
+};
+
+const loadTrackerList = (): TrackerEntry[] => {
+    const trackerPath = path.resolve(__dirname, '../lib/tracker-list.json');
+    try {
+        const raw = fs.readFileSync(trackerPath, 'utf8');
+        const parsed = JSON.parse(raw) as unknown;
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        const entries: TrackerEntry[] = [];
+        for (const item of parsed) {
+            if (typeof item === 'string') {
+                const domain = normalizeDomain(item);
+                if (domain) {
+                    entries.push({ domain });
+                }
+                continue;
+            }
+            if (item && typeof item === 'object') {
+                const record = item as { domain?: unknown; owner?: unknown; category?: unknown };
+                if (typeof record.domain !== 'string') {
+                    continue;
+                }
+                const domain = normalizeDomain(record.domain);
+                if (!domain) {
+                    continue;
+                }
+                const entry: TrackerEntry = { domain };
+                if (typeof record.owner === 'string') {
+                    entry.owner = record.owner;
+                }
+                if (typeof record.category === 'string') {
+                    entry.category = record.category;
+                }
+                entries.push(entry);
+            }
+        }
+        return entries;
+    } catch (error) {
+        console.warn('[Protect] Failed to load tracker list:', error);
+        return [];
+    }
+};
+
+const buildTrackerAudit = (
+    primaryUrl: string | null,
+    resourceUrls: string[]
+): {
+    primaryDomain: string | null;
+    thirdPartyResources: string[];
+    trackerMatches: TrackerMatch[];
+    trackersFound: number;
+    thirdPartyCount: number;
+} => {
+    const trackerEntries = loadTrackerList();
+    const fallbackEntries: TrackerEntry[] = FALLBACK_TRACKER_DOMAINS.map((domain) => ({ domain }));
+    const trackers = trackerEntries.length > 0 ? trackerEntries : fallbackEntries;
+
+    let primaryDomain: string | null = null;
+    if (primaryUrl) {
+        try {
+            const primaryHostname = new URL(primaryUrl).hostname.toLowerCase();
+            primaryDomain = getRegistrableDomain(primaryHostname);
+        } catch {
+            primaryDomain = null;
+        }
+    }
+
+    const thirdPartyResources: string[] = [];
+    const trackerMatches: TrackerMatch[] = [];
+
+    for (const resourceUrl of resourceUrls) {
+        let parsed: URL;
+        try {
+            parsed = new URL(resourceUrl);
+        } catch {
+            continue;
+        }
+        const hostname = parsed.hostname.toLowerCase();
+        const registrable = getRegistrableDomain(hostname);
+        const isThirdParty = primaryDomain ? registrable !== primaryDomain : true;
+
+        if (isThirdParty) {
+            if (!thirdPartyResources.includes(resourceUrl)) {
+                thirdPartyResources.push(resourceUrl);
+            }
+        } else {
+            continue;
+        }
+
+        for (const tracker of trackers) {
+            const trackerDomain = tracker.domain.toLowerCase();
+            if (hostname === trackerDomain || hostname.endsWith(`.${trackerDomain}`)) {
+                const match: TrackerMatch = {
+                    resourceUrl,
+                    hostname,
+                    trackerDomain
+                };
+                if (tracker.owner) {
+                    match.owner = tracker.owner;
+                }
+                if (tracker.category) {
+                    match.category = tracker.category;
+                }
+                trackerMatches.push(match);
+            }
+        }
+    }
+
+    const uniqueTrackerMatches: TrackerMatch[] = [];
+    for (const match of trackerMatches) {
+        if (
+            !uniqueTrackerMatches.some(
+                (existing) =>
+                    existing.hostname === match.hostname &&
+                    existing.trackerDomain === match.trackerDomain &&
+                    existing.resourceUrl === match.resourceUrl
+            )
+        ) {
+            uniqueTrackerMatches.push(match);
+        }
+    }
+
+    const uniqueTrackerDomains = new Set(uniqueTrackerMatches.map((match) => match.trackerDomain));
+
+    return {
+        primaryDomain,
+        thirdPartyResources,
+        trackerMatches: uniqueTrackerMatches,
+        trackersFound: uniqueTrackerDomains.size,
+        thirdPartyCount: thirdPartyResources.length
+    };
+};
+
 const maskEmail = (value: string): string => {
     const parts = value.split('@');
     const name = parts[0] ?? '';
@@ -519,17 +766,21 @@ export const handleProtect = async (req: Request, res: Response): Promise<void> 
         const body = (req.body ?? {}) as ProtectRequestBody;
         const text = readTextFromBody(body);
         const urls = collectUrls(body, text);
+        const resourceUrls = collectResourceUrls(body, text);
+        const primaryUrl = resolvePrimaryUrl(body, urls.length > 0 ? urls : resourceUrls);
 
-        if (!text && urls.length === 0) {
-            throw new ProtectError(400, 'Provide text or URL content for protection checks.');
+        if (!text && urls.length === 0 && resourceUrls.length === 0) {
+            throw new ProtectError(400, 'Provide text, URL, or resource list for protection checks.');
         }
 
         const phishingFlags = buildPhishingFlags(text);
         const lookalikeMatches = buildLookalikeMatches(urls);
         const { maskedText, detections, totalCount } = detectAndMaskPii(text);
+        const trackerAudit = buildTrackerAudit(primaryUrl, resourceUrls);
 
         const phishingScore = clamp(phishingFlags.length * 15 + lookalikeMatches.length * 18, 0, 100);
         const piiScore = clamp(totalCount * 18, 0, 100);
+        const privacyScore = clamp(trackerAudit.thirdPartyCount * 8 + trackerAudit.trackersFound * 18, 0, 100);
 
         res.status(200).json({
             status: 'success',
@@ -546,9 +797,19 @@ export const handleProtect = async (req: Request, res: Response): Promise<void> 
                     detections,
                     maskedText
                 },
+                privacyRisk: {
+                    score: privacyScore,
+                    level: summarizeRiskLevel(privacyScore),
+                    primaryDomain: trackerAudit.primaryDomain,
+                    thirdPartyCount: trackerAudit.thirdPartyCount,
+                    trackersFound: trackerAudit.trackersFound,
+                    thirdPartyResources: trackerAudit.thirdPartyResources,
+                    trackerMatches: trackerAudit.trackerMatches
+                },
                 analyzed: {
                     textLength: text.length,
-                    urlCount: urls.length
+                    urlCount: urls.length,
+                    resourceCount: resourceUrls.length
                 }
             }
         });
