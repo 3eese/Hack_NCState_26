@@ -35,40 +35,45 @@ curl http://localhost:8000/health
 
 ## 4. Use the Extension
 
-### Open/Close Behavior
+### Open/Close
 
 1. Move cursor to the **right edge** of any `http/https` page to open sidebar
-2. Click **outside** sidebar to close
+2. Click outside sidebar to close
 3. Alternative toggle:
    1. Extension toolbar icon
    2. `Ctrl + Shift + Z` (`Cmd + Shift + Z` on Mac)
 
-### Scan Actions
+### Analysis Flow
 
-1. **Analyze Selection**
-   1. Highlight text on the page
-   2. Click button
-2. **Analyze Page URL**
-   1. Sends current page URL to backend
-3. **Use Pasted Text**
-   1. Paste content in textarea
-   2. Click button
-   3. If pasted value is a URL, extension auto-routes as URL input
+1. Choose mode: **Verify** or **Protect**
+2. Choose input tab: **Image**, **URL**, or **Text**
+3. Run analysis:
+   1. Manual upload/input + **Analyze**
+   2. **Capture Full View & Analyze**
+   3. **Capture Area & Analyze**
+   4. In Image tab: paste screenshot via `Ctrl/Cmd + V`
 
-### Report Output
+### Capture Modes
 
-The extension calls backend through service worker:
+1. **Full View**
+   1. Captures current visible tab viewport
+   2. Sends screenshot directly for selected mode analysis
+2. **Area Capture**
+   1. Captures full visible tab viewport
+   2. Prompts drag-to-select area overlay
+   3. Crops selection and sends cropped image for analysis
+   4. Press `Esc` to cancel selection
 
-1. `POST /api/ingest`
-2. `POST /api/verify`
-3. `POST /api/protect`
+### Backend Routing
 
-Results are shown in two cards:
+The service worker handles extension-side routing:
 
-1. Verify
-2. Protect
-
-Each card includes verdict, score, summary, key findings, source count, and endpoint timing.
+1. Text/Image inputs: call selected endpoint directly
+   1. `POST /api/verify` or `POST /api/protect`
+2. URL input:
+   1. Attempt `POST /api/ingest`
+   2. Then selected endpoint with normalized data
+   3. Fallback to direct selected endpoint if ingest fails
 
 ## 5. Development Workflow
 
@@ -83,13 +88,7 @@ When you edit extension files:
 
 Default backend URL is `http://localhost:8000`.
 
-You can change it directly in the sidebar:
-
-1. Open sidebar
-2. In **Backend Connection**, enter new base URL
-3. Click **Save**
-
-Alternative (service worker console):
+To override:
 
 ```js
 chrome.storage.local.set({ zedaBackendBaseUrl: "https://your-api.example.com" });
@@ -99,12 +98,12 @@ Reload extension after changing this value.
 
 ## 7. Troubleshooting
 
-1. **Sidebar does not appear**
+1. Sidebar does not appear:
    1. Ensure page is `http/https` (not `chrome://` pages)
    2. Reload extension and refresh page
-2. **Scan fails**
+2. Capture fails:
+   1. Check browser permission prompts
+   2. Ensure active tab is a normal web page
+3. Analysis times out:
    1. Confirm backend is running on configured URL
-   2. Check backend logs for endpoint errors
-3. **No results in cards**
-   1. Inspect extension service worker console for network errors
-   2. Verify CORS/host permissions match backend origin
+   2. Check backend logs for `/api/verify` or `/api/protect` latency/errors
