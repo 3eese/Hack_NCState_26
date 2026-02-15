@@ -354,6 +354,10 @@ const buildFallbackResult = (
 ): GeminiAnalysisResult => {
     const groundedEvidence = sanitizeGroundedEvidence(payload.candidates?.[0]?.groundingMetadata);
     const shortInput = truncate(content.replace(/\s+/g, ' ').trim(), 220);
+    const safeSnippet =
+        inputType === 'image'
+            ? 'Uploaded image content could not be summarized from model output.'
+            : shortInput;
 
     const defaultScore = mode === 'verify' ? 45 : 55;
     const summary = groundedEvidence.length > 0
@@ -367,8 +371,8 @@ const buildFallbackResult = (
             : 'No grounding sources were returned for this request.'
     ];
 
-    const fakeParts = shortInput
-        ? [`Claim under review: "${shortInput}"`]
+    const fakeParts = safeSnippet
+        ? [`Claim under review: "${safeSnippet}"`]
         : ['Input could not be summarized from the request payload.'];
 
     const recommendedActions = mode === 'verify'
