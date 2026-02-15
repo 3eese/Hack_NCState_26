@@ -1,23 +1,11 @@
-# Zeda MV3 Extension (Phase 1)
+# Zeda MV3 Extension
 
-This folder contains the Phase 1 shell for the Zeda browser extension:
+Current implementation includes:
 
-1. Manifest V3 setup
-2. Service worker
-3. Toolbar + keyboard shortcut trigger
-4. On-demand sliding sidebar injection
+1. Phase 1 shell (manifest, worker, shortcut, injection)
+2. Phase 2 sidebar UI (Shadow DOM + Sider-style open/close behavior)
+3. Phase 3 integration (`/api/ingest`, `/api/verify`, `/api/protect` via service worker)
 
-## Load Locally (Chrome / Chromium)
+For developer setup and usage instructions, see:
 
-1. Open `chrome://extensions`
-2. Enable **Developer mode**
-3. Click **Load unpacked**
-4. Select the `/extension` folder
-5. Open any `http` or `https` page
-6. Click the extension icon, or use `Ctrl/Command + Shift + Z`
-
-## Notes
-
-1. This is a Phase 1 shell only.
-2. API calls to backend are not wired yet.
-3. Next phase adds scan actions and message-based API integration.
+- [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)
