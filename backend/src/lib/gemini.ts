@@ -5,6 +5,7 @@ type AnalyzeInputParams = {
     mode: AnalysisMode;
     inputType: InputType;
     content: string;
+    timeoutMs?: number;
 };
 
 type EvidenceSource = {
@@ -400,7 +401,8 @@ const buildFallbackResult = (
 export const analyzeInputWithGemini = async ({
     mode,
     inputType,
-    content
+    content,
+    timeoutMs: timeoutOverrideMs
 }: AnalyzeInputParams): Promise<GeminiAnalysisResult> => {
     if (!content || !content.trim()) {
         throw new GeminiRequestError(400, 'Missing analysis content.');
@@ -408,7 +410,10 @@ export const analyzeInputWithGemini = async ({
 
     const apiKey = resolveApiKey();
     const model = resolveModel();
-    const timeoutMs = resolveTimeoutMs();
+    const timeoutMs =
+        Number.isFinite(timeoutOverrideMs) && (timeoutOverrideMs as number) > 0
+            ? (timeoutOverrideMs as number)
+            : resolveTimeoutMs();
     const prompt = buildPrompt(mode);
 
     const parts: Array<Record<string, unknown>> = [{ text: prompt }];
