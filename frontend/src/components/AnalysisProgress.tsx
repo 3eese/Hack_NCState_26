@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 
 interface AnalysisStep {
   label: string;
+  durationLabel?: string;
   status: "pending" | "active" | "done";
 }
 
@@ -30,14 +31,21 @@ export const AnalysisProgress = ({ steps, className }: AnalysisProgressProps) =>
               i + 1
             )}
           </div>
-          <span className={cn(
-            "text-sm font-medium transition-colors",
-            step.status === "done" && "text-primary",
-            step.status === "active" && "text-foreground",
-            step.status === "pending" && "text-muted-foreground"
-          )}>
-            {step.label}
-          </span>
+          <div className="flex-1 flex items-center justify-between gap-3 min-w-0">
+            <span className={cn(
+              "text-sm font-medium transition-colors truncate",
+              step.status === "done" && "text-primary",
+              step.status === "active" && "text-foreground",
+              step.status === "pending" && "text-muted-foreground"
+            )}>
+              {step.label}
+            </span>
+            {step.durationLabel ? (
+              <span className="text-xs font-semibold text-muted-foreground shrink-0 tabular-nums">
+                {step.durationLabel}
+              </span>
+            ) : null}
+          </div>
         </div>
       ))}
     </div>

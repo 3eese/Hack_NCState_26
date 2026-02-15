@@ -37,7 +37,95 @@ type ApiResultData = {
   model: string;
 };
 
+type StepTimingKey = "extractingContent" | "analyzingClaimsOrRisk" | "scoringAndReport";
+
+type EndpointResult<T = unknown> = {
+  ok: boolean;
+  status: number;
+  ms: number;
+  data: T | null;
+  error: string | null;
+};
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const DEFAULT_REQUEST_TIMEOUT_MS = 70000;
+const INGEST_REQUEST_TIMEOUT_MS = 25000;
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === "object" && value !== null;
+};
+
+const readTrimmedString = (value: unknown): string => {
+  return typeof value === "string" ? value.trim() : "";
+};
+
+const formatDurationLabel = (durationMs: number): string => {
+  const seconds = Math.max(0, durationMs / 1000);
+  if (seconds >= 10) {
+    return `${Math.round(seconds)}s`;
+  }
+  return `${seconds.toFixed(1)}s`;
+};
+
+const callJsonEndpoint = async <T,>(
+  url: string,
+  payload: Record<string, unknown>,
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+): Promise<EndpointResult<T>> => {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  const startedAt = performance.now();
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    let json: unknown = null;
+    try {
+      json = await response.json();
+    } catch {
+      json = null;
+    }
+
+    const envelope = isRecord(json) ? json : null;
+    const isApiSuccess = envelope ? envelope.status !== "error" : true;
+    const ok = response.ok && isApiSuccess;
+    const endpointMessage = envelope && typeof envelope.message === "string" && envelope.message.trim().length > 0
+      ? envelope.message.trim()
+      : `Request failed with status ${response.status}.`;
+
+    return {
+      ok,
+      status: response.status,
+      ms: performance.now() - startedAt,
+      data: envelope ? (envelope.data as T | null) : null,
+      error: ok ? null : endpointMessage,
+    };
+  } catch (error) {
+    const message = error instanceof Error && error.name === "AbortError"
+      ? `Request timed out after ${Math.round(timeoutMs / 1000)}s.`
+      : error instanceof Error
+        ? error.message
+        : "Unknown request failure.";
+
+    return {
+      ok: false,
+      status: 0,
+      ms: performance.now() - startedAt,
+      data: null,
+      error: message,
+    };
+  } finally {
+    window.clearTimeout(timeout);
+  }
+};
 
 const getDomainFromUrl = (url: string): string => {
   try {
@@ -163,12 +251,56 @@ const Results = () => {
   const [step, setStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ApiResultData | null>(null);
+  const [stepTimingsMs, setStepTimingsMs] = useState<Partial<Record<StepTimingKey, number>>>({});
+  const [activeStepTiming, setActiveStepTiming] = useState<{ key: StepTimingKey; startedAt: number } | null>(null);
+  const [activeStepElapsedMs, setActiveStepElapsedMs] = useState(0);
+
+  useEffect(() => {
+    if (!activeStepTiming) {
+      setActiveStepElapsedMs(0);
+      return;
+    }
+
+    const updateElapsed = () => {
+      setActiveStepElapsedMs(Math.max(0, performance.now() - activeStepTiming.startedAt));
+    };
+
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 100);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [activeStepTiming]);
 
   useEffect(() => {
     let mounted = true;
-    const stepTimer = setInterval(() => {
-      setStep((current) => (current < 2 ? current + 1 : current));
-    }, 700);
+
+    // Measure each visible phase directly so the UI shows real elapsed time, not a synthetic timer.
+    const runMeasuredStep = async <T,>(
+      key: StepTimingKey,
+      activeStepIndex: number,
+      task: () => Promise<T>,
+    ): Promise<T> => {
+      if (mounted) {
+        setStep(activeStepIndex);
+      }
+
+      const startedAt = performance.now();
+      if (mounted) {
+        setActiveStepTiming({ key, startedAt });
+      }
+
+      try {
+        return await task();
+      } finally {
+        const elapsedMs = performance.now() - startedAt;
+        if (mounted) {
+          setStepTimingsMs((current) => ({ ...current, [key]: elapsedMs }));
+          setActiveStepTiming((current) => (current?.key === key ? null : current));
+        }
+      }
+    };
 
     const fetchResult = async () => {
       try {
@@ -178,30 +310,91 @@ const Results = () => {
         }
 
         const submission = JSON.parse(rawSubmission) as SubmissionPayload;
-        if (!submission.content?.trim()) {
+        const sourceContent = submission.content?.trim();
+        if (!sourceContent) {
           throw new Error("Submission content is empty. Please try again.");
         }
 
         const endpoint = submission.mode === "protect" ? "protect" : "verify";
-        const response = await fetch(`${API_BASE_URL}/api/${endpoint}`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            inputType: submission.inputType,
-            content: submission.content,
-          }),
+        let normalizedInputType: InputType = submission.inputType;
+        let normalizedContent = sourceContent;
+        let normalizedPayload: Record<string, unknown> | null = null;
+        let ingestError: string | null = null;
+
+        await runMeasuredStep("extractingContent", 0, async () => {
+          const ingestResponse = await callJsonEndpoint<Record<string, unknown>>(
+            `${API_BASE_URL}/api/ingest`,
+            {
+              inputType: submission.inputType,
+              content: sourceContent,
+            },
+            INGEST_REQUEST_TIMEOUT_MS,
+          );
+
+          if (!ingestResponse.ok) {
+            ingestError = ingestResponse.error;
+            return;
+          }
+
+          const ingestData = ingestResponse.data;
+          const candidatePayload = ingestData && isRecord(ingestData.normalizedPayload)
+            ? ingestData.normalizedPayload
+            : null;
+
+          if (!candidatePayload) {
+            return;
+          }
+
+          normalizedPayload = candidatePayload;
+
+          const normalizedTypeRaw = readTrimmedString(candidatePayload.inputType);
+          if (normalizedTypeRaw === "text" || normalizedTypeRaw === "url" || normalizedTypeRaw === "image") {
+            normalizedInputType = normalizedTypeRaw;
+          }
+
+          const extractedText = readTrimmedString(candidatePayload.text);
+          if (extractedText) {
+            normalizedContent = extractedText;
+          }
         });
 
-        const payload = await response.json();
-        if (!response.ok || payload.status !== "success") {
-          throw new Error(payload.message || "Analysis failed.");
+        const analysisRequestBody: Record<string, unknown> = {
+          inputType: normalizedInputType,
+          content: normalizedContent || sourceContent,
+        };
+
+        if (normalizedPayload) {
+          analysisRequestBody.normalizedPayload = normalizedPayload;
         }
 
-        if (mounted) {
-          setResult(normalizeResultData(payload.data, submission.mode));
+        if (submission.inputType === "url") {
+          analysisRequestBody.url = sourceContent;
         }
+
+        let rawAnalysisData: unknown = null;
+        await runMeasuredStep("analyzingClaimsOrRisk", 1, async () => {
+          const analysisResponse = await callJsonEndpoint<unknown>(
+            `${API_BASE_URL}/api/${endpoint}`,
+            analysisRequestBody,
+          );
+
+          if (!analysisResponse.ok) {
+            const fallbackHint = ingestError ? ` Ingest fallback: ${ingestError}` : "";
+            throw new Error(`${analysisResponse.error || "Analysis failed."}${fallbackHint}`);
+          }
+
+          rawAnalysisData = analysisResponse.data;
+        });
+
+        await runMeasuredStep("scoringAndReport", 2, async () => {
+          if (rawAnalysisData === null || rawAnalysisData === undefined) {
+            throw new Error("Analysis returned an empty payload.");
+          }
+
+          if (mounted) {
+            setResult(normalizeResultData(rawAnalysisData, submission.mode));
+          }
+        });
       } catch (err) {
         if (mounted) {
           const message = err instanceof Error ? err.message : "Failed to run analysis.";
@@ -209,6 +402,7 @@ const Results = () => {
         }
       } finally {
         if (mounted) {
+          setActiveStepTiming(null);
           setStep(3);
           setLoading(false);
         }
@@ -219,14 +413,38 @@ const Results = () => {
 
     return () => {
       mounted = false;
-      clearInterval(stepTimer);
     };
   }, []);
 
+  const resolveTimingLabel = (key: StepTimingKey): string | undefined => {
+    const measuredMs = stepTimingsMs[key];
+    if (typeof measuredMs === "number") {
+      return formatDurationLabel(measuredMs);
+    }
+
+    if (activeStepTiming?.key === key) {
+      return formatDurationLabel(activeStepElapsedMs);
+    }
+
+    return undefined;
+  };
+
   const analysisSteps = [
-    { label: "Extracting content...", status: step >= 1 ? "done" as const : step === 0 ? "active" as const : "pending" as const },
-    { label: mode === "verify" ? "Verifying claims..." : "Scanning privacy/scam risk...", status: step >= 2 ? "done" as const : step === 1 ? "active" as const : "pending" as const },
-    { label: "Scoring & generating report...", status: step >= 3 ? "done" as const : step === 2 ? "active" as const : "pending" as const },
+    {
+      label: "Extracting content...",
+      durationLabel: resolveTimingLabel("extractingContent"),
+      status: step >= 1 ? "done" as const : step === 0 ? "active" as const : "pending" as const,
+    },
+    {
+      label: mode === "verify" ? "Verifying claims..." : "Scanning privacy/scam risk...",
+      durationLabel: resolveTimingLabel("analyzingClaimsOrRisk"),
+      status: step >= 2 ? "done" as const : step === 1 ? "active" as const : "pending" as const,
+    },
+    {
+      label: "Scoring & generating report...",
+      durationLabel: resolveTimingLabel("scoringAndReport"),
+      status: step >= 3 ? "done" as const : step === 2 ? "active" as const : "pending" as const,
+    },
   ];
 
   if (loading) {
