@@ -1,6 +1,15 @@
 import type { Request, Response } from 'express';
 import { analyzeInputWithGemini, GeminiRequestError } from '../lib/gemini';
 
+type VerifyRequestBody = {
+    inputType?: unknown;
+    content?: unknown;
+    text?: unknown;
+    normalizedPayload?: {
+        text?: unknown;
+    };
+};
+
 const normalizeInputType = (value: unknown): 'text' | 'url' | 'image' | null => {
     if (typeof value !== 'string') {
         return null;
@@ -13,17 +22,27 @@ const normalizeInputType = (value: unknown): 'text' | 'url' | 'image' | null => 
     return null;
 };
 
+const readContent = (body: VerifyRequestBody): string => {
+    const candidates = [body.content, body.text, body.normalizedPayload?.text];
+    for (const candidate of candidates) {
+        if (typeof candidate !== 'string') {
+            continue;
+        }
+        const trimmed = candidate.trim();
+        if (trimmed.length > 0) {
+            return trimmed;
+        }
+    }
+    return '';
+};
+
 export const handleVerify = async (req: Request, res: Response): Promise<void> => {
     try {
-        const inputType = normalizeInputType(req.body?.inputType);
-        const content = typeof req.body?.content === 'string' ? req.body.content : '';
+        const body = (req.body ?? {}) as VerifyRequestBody;
+        const inputType = normalizeInputType(body.inputType) ?? 'text';
+        const content = readContent(body);
 
-        if (!inputType) {
-            res.status(400).json({ status: 'error', message: 'inputType must be one of text, url, image.' });
-            return;
-        }
-
-        if (!content.trim()) {
+        if (!content) {
             res.status(400).json({ status: 'error', message: 'content is required.' });
             return;
         }
