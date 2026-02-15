@@ -52,6 +52,7 @@ type EndpointResult<T = unknown> = {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const DEFAULT_REQUEST_TIMEOUT_MS = 70000;
 const INGEST_REQUEST_TIMEOUT_MS = 25000;
+const BRAND_LOGO_SRC = "/resources/zeda_logo.png";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null;
@@ -462,10 +463,7 @@ const Results = () => {
         <div className="noise-overlay" aria-hidden="true" />
         <nav className="relative z-10 glass-dark">
           <div className="mx-auto flex max-w-7xl items-center gap-2 px-6 py-4">
-            <div className="flex h-8 w-8 items-center justify-center rounded-sharp bg-brass text-noir-base">
-              {mode === "verify" ? <Eye className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
-            </div>
-            <span className="font-display text-xl text-foreground">Zeda</span>
+            <img src={BRAND_LOGO_SRC} alt="Zeda" className="h-14 sm:h-16 w-auto rounded-sharp object-contain" />
           </div>
         </nav>
         <main className="relative z-10 flex min-h-[calc(100vh-72px)] items-center justify-center px-6">
@@ -493,7 +491,7 @@ const Results = () => {
           <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
             <button onClick={() => navigate("/")} className="flex items-center gap-2 text-muted-foreground transition-colors hover:text-foreground">
               <ArrowLeft className="h-4 w-4" />
-              <span className="font-display text-xl text-foreground">Zeda</span>
+              <img src={BRAND_LOGO_SRC} alt="Zeda" className="h-14 sm:h-16 w-auto rounded-sharp object-contain" />
             </button>
           </div>
         </nav>
@@ -531,10 +529,7 @@ const Results = () => {
           <button onClick={() => navigate("/")} className="flex items-center gap-2 text-muted-foreground transition-colors hover:text-foreground">
             <ArrowLeft className="h-4 w-4" />
             <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-sharp bg-brass text-noir-base">
-                {mode === "verify" ? <Eye className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
-              </div>
-              <span className="font-display text-xl text-foreground">Zeda</span>
+              <img src={BRAND_LOGO_SRC} alt="Zeda" className="h-14 sm:h-16 w-auto rounded-sharp object-contain" />
             </div>
           </button>
           <div className="flex items-center gap-2 text-muted-foreground">

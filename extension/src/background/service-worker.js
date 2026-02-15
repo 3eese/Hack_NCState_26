@@ -251,6 +251,11 @@ const runScanPipeline = async ({ mode, inputType, content, source }) => {
   }
 
   const finishedAt = Date.now();
+  const totalMs = finishedAt - startedAt;
+  const extractMs = Number.isFinite(ingestResult?.ms) ? Math.max(0, ingestResult.ms) : 0;
+  const analyzeMs = Number.isFinite(analysisResult?.ms) ? Math.max(0, analysisResult.ms) : 0;
+  const scoringMs = Math.max(0, totalMs - extractMs - analyzeMs);
+
   return {
     backendBaseUrl: baseUrl,
     mode,
@@ -262,7 +267,12 @@ const runScanPipeline = async ({ mode, inputType, content, source }) => {
     ingest: ingestResult,
     analysis: analysisResult,
     timings: {
-      totalMs: finishedAt - startedAt
+      totalMs,
+      stepsMs: {
+        extractingContent: extractMs,
+        analyzingClaimsOrRisk: analyzeMs,
+        scoringAndReport: scoringMs
+      }
     }
   };
 };

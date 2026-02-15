@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Zeda Sidebar",
-  "version": "0.7.4",
+  "version": "0.7.6",
   "description": "Injects a Zeda sliding sidebar into the active page.",
   "permissions": ["activeTab", "scripting", "storage", "tabs"],
   "host_permissions": ["<all_urls>", "http://localhost:8000/*", "http://127.0.0.1:8000/*"],
@@ -17,12 +17,22 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["src/content/sidebar.css"],
+      "resources": ["src/content/sidebar.css", "resources/zeda_logo.png"],
       "matches": ["http://*/*", "https://*/*"]
     }
   ],
+  "icons": {
+    "16": "resources/zeda_logo.png",
+    "32": "resources/zeda_logo.png",
+    "48": "resources/zeda_logo.png",
+    "128": "resources/zeda_logo.png"
+  },
   "action": {
-    "default_title": "Toggle Zeda Sidebar"
+    "default_title": "Toggle Zeda Sidebar",
+    "default_icon": {
+      "16": "resources/zeda_logo.png",
+      "32": "resources/zeda_logo.png"
+    }
   },
   "commands": {
     "toggle-zeda-sidebar": {

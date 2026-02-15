@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import noirHero from "@/assets/noir-hero.jpg";
 
 type InputType = "image" | "url" | "text";
+const BRAND_LOGO_SRC = "/resources/zeda_logo.png";
 
 const tabs: { id: InputType; label: string; icon: typeof Image }[] = [
   { id: "image", label: "Image", icon: Upload },
@@ -80,10 +81,7 @@ const Submit = () => {
           <button onClick={() => navigate("/")} className="flex items-center gap-2 text-muted-foreground transition-colors hover:text-foreground">
             <ArrowLeft className="w-4 h-4" />
             <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-sharp bg-brass text-noir-base">
-                {isVerify ? <Eye className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
-              </div>
-              <span className="font-display text-xl text-foreground">Zeda</span>
+              <img src={BRAND_LOGO_SRC} alt="Zeda" className="h-14 sm:h-16 w-auto rounded-sharp object-contain" />
             </div>
           </button>
           <Chip variant={isVerify ? "success" : "warning"}>
