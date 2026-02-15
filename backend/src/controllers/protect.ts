@@ -1,4 +1,17 @@
 import type { Request, Response } from 'express';
+import { analyzeInputWithGemini, GeminiRequestError } from '../lib/gemini';
+
+const normalizeInputType = (value: unknown): 'text' | 'url' | 'image' | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+
+    if (value === 'text' || value === 'url' || value === 'image') {
+        return value;
+    }
+
+    return null;
+};
 
 type ProtectRequestBody = {
     inputType?: unknown;
@@ -544,6 +557,7 @@ export const handleProtect = async (req: Request, res: Response): Promise<void> 
             res.status(error.status).json({ status: 'error', message: error.message });
             return;
         }
+
         console.error('[Protect Error]:', error);
         res.status(500).json({ status: 'error', message: 'Internal Server Error' });
     }

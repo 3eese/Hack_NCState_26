@@ -39,9 +39,22 @@ const Submit = () => {
     (activeTab === "image" && imageFile !== null);
 
   const handleAnalyze = () => {
-    // For MVP, navigate to results with mock data
-    const input = activeTab === "text" ? textInput : activeTab === "url" ? urlInput : "image-upload";
-    navigate(`/results?mode=${mode}&type=${activeTab}&input=${encodeURIComponent(input.slice(0, 200))}`);
+    const content =
+      activeTab === "text"
+        ? textInput.trim()
+        : activeTab === "url"
+          ? urlInput.trim()
+          : imagePreview ?? "";
+
+    const submission = {
+      mode,
+      inputType: activeTab,
+      content,
+      createdAt: Date.now(),
+    };
+
+    sessionStorage.setItem("zeda:lastSubmission", JSON.stringify(submission));
+    navigate(`/results?mode=${mode}`);
   };
 
   return (

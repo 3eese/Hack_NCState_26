@@ -1,79 +1,123 @@
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { ScoreGauge, getVerdict, getScoreColor } from "@/components/ScoreGauge";
+import { ScoreGauge, getVerdict } from "@/components/ScoreGauge";
 import { EvidenceCard } from "@/components/EvidenceCard";
 import { ReasonBullet } from "@/components/ReasonBullet";
 import { Chip } from "@/components/Chip";
 import { AnalysisProgress } from "@/components/AnalysisProgress";
-import { ArrowLeft, Zap, Copy, Share2, RotateCcw } from "lucide-react";
+import { ArrowLeft, Zap, Copy, RotateCcw } from "lucide-react";
 import { useState, useEffect } from "react";
-import { cn } from "@/lib/utils";
 
-// Mock data for demo
-const verifyMock = {
-  score: 82,
-  reasons: [
-    { text: "Claim corroborated by Reuters and AP News with matching details.", tag: "Source" as const, positive: true },
-    { text: "Official domain nasa.gov referenced in original claim.", tag: "Domain" as const, positive: true },
-    { text: "3 independent sources confirm the core facts.", tag: "Consistency" as const, positive: true },
-    { text: "Date in claim matches official announcement timeline.", tag: "Source" as const, positive: true },
-    { text: "No contradicting reports found in major outlets.", tag: "Consistency" as const, positive: true },
-  ],
-  evidence: [
-    { title: "NASA Confirms New Artemis Mission Date", domain: "reuters.com", snippet: "NASA announced the updated Artemis III mission timeline, confirming a 2026 launch window...", url: "#" },
-    { title: "Artemis Program Update - Official Statement", domain: "nasa.gov", snippet: "The agency today released revised mission parameters for the Artemis III crewed lunar landing...", url: "#" },
-    { title: "Space agency updates moon mission schedule", domain: "apnews.com", snippet: "In a press briefing, NASA officials outlined changes to the Artemis program timeline...", url: "#" },
-  ],
-  nextSteps: [
-    "This claim appears well-supported by official and reputable sources.",
-    "Cross-reference with NASA's official press releases for latest updates.",
-    "Share the official source links rather than screenshots for accuracy.",
-  ],
+type Mode = "verify" | "protect";
+type InputType = "text" | "url" | "image";
+
+type SubmissionPayload = {
+  mode: Mode;
+  inputType: InputType;
+  content: string;
+  createdAt: number;
 };
 
-const protectMock = {
-  score: 78,
-  reasons: [
-    { text: "Message requests immediate action on account credentials.", tag: "Urgency" as const, positive: false },
-    { text: "Sender domain doesn't match official PayPal domain.", tag: "Domain" as const, positive: false },
-    { text: "Contains shortened URL that redirects to unknown host.", tag: "Links" as const, positive: false },
-    { text: "Email address detected: j***@gmail.com", tag: "PII" as const, positive: false },
-    { text: "Payment-related language with gift card request.", tag: "Scam" as const, positive: false },
-  ],
-  piiItems: [
-    { type: "Email", masked: "j****@gmail.com" },
-    { type: "Phone", masked: "(555) ***-**89" },
-  ],
-  nextSteps: [
-    "Do NOT click any links in this message.",
-    "Go directly to paypal.com by typing it in your browser.",
-    "Report this message as phishing to your email provider.",
-    "If you clicked any links, change your PayPal password immediately.",
-    "Enable two-factor authentication on your PayPal account.",
-  ],
+type ApiEvidence = {
+  title: string;
+  url: string;
+  snippet: string;
+};
+
+type ApiResultData = {
+  mode: Mode;
+  inputType: InputType;
+  veracityIndex: number;
+  verdict: string;
+  summary: string;
+  extractedText: string;
+  keyFindings: string[];
+  fakeParts: string[];
+  recommendedActions: string[];
+  evidenceSources: ApiEvidence[];
+  model: string;
+};
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+
+const getDomainFromUrl = (url: string): string => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "unknown-source";
+  }
 };
 
 const Results = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const mode = (searchParams.get("mode") as "verify" | "protect") || "verify";
+  const mode = (searchParams.get("mode") as Mode) || "verify";
   const [loading, setLoading] = useState(true);
   const [step, setStep] = useState(0);
-
-  const data = mode === "verify" ? verifyMock : protectMock;
-  const verdict = getVerdict(data.score, mode);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<ApiResultData | null>(null);
 
   useEffect(() => {
-    const timers = [
-      setTimeout(() => setStep(1), 600),
-      setTimeout(() => setStep(2), 1400),
-      setTimeout(() => { setStep(3); setLoading(false); }, 2200),
-    ];
-    return () => timers.forEach(clearTimeout);
+    let mounted = true;
+    const stepTimer = setInterval(() => {
+      setStep((current) => (current < 2 ? current + 1 : current));
+    }, 700);
+
+    const fetchResult = async () => {
+      try {
+        const rawSubmission = sessionStorage.getItem("zeda:lastSubmission");
+        if (!rawSubmission) {
+          throw new Error("No submission found. Please submit an input first.");
+        }
+
+        const submission = JSON.parse(rawSubmission) as SubmissionPayload;
+        if (!submission.content?.trim()) {
+          throw new Error("Submission content is empty. Please try again.");
+        }
+
+        const endpoint = submission.mode === "protect" ? "protect" : "verify";
+        const response = await fetch(`${API_BASE_URL}/api/${endpoint}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            inputType: submission.inputType,
+            content: submission.content,
+          }),
+        });
+
+        const payload = await response.json();
+        if (!response.ok || payload.status !== "success") {
+          throw new Error(payload.message || "Analysis failed.");
+        }
+
+        if (mounted) {
+          setResult(payload.data as ApiResultData);
+        }
+      } catch (err) {
+        if (mounted) {
+          const message = err instanceof Error ? err.message : "Failed to run analysis.";
+          setError(message);
+        }
+      } finally {
+        if (mounted) {
+          setStep(3);
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchResult();
+
+    return () => {
+      mounted = false;
+      clearInterval(stepTimer);
+    };
   }, []);
 
   const analysisSteps = [
     { label: "Extracting content...", status: step >= 1 ? "done" as const : step === 0 ? "active" as const : "pending" as const },
-    { label: mode === "verify" ? "Searching sources..." : "Scanning for risks...", status: step >= 2 ? "done" as const : step === 1 ? "active" as const : "pending" as const },
+    { label: mode === "verify" ? "Verifying claims..." : "Scanning privacy/scam risk...", status: step >= 2 ? "done" as const : step === 1 ? "active" as const : "pending" as const },
     { label: "Scoring & generating report...", status: step >= 3 ? "done" as const : step === 2 ? "active" as const : "pending" as const },
   ];
 
@@ -98,6 +142,40 @@ const Results = () => {
     );
   }
 
+  if (error || !result) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <nav className="border-b border-border px-6 py-4">
+          <div className="max-w-4xl mx-auto flex items-center justify-between">
+            <button onClick={() => navigate("/")} className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
+              <ArrowLeft className="w-4 h-4" />
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-primary/20 flex items-center justify-center">
+                  <Zap className="w-3.5 h-3.5 text-primary" />
+                </div>
+                <span className="text-base font-bold text-foreground">Zeda</span>
+              </div>
+            </button>
+          </div>
+        </nav>
+        <main className="flex-1 px-6 py-8 max-w-2xl mx-auto w-full">
+          <div className="rounded-xl border border-destructive/40 bg-card p-5">
+            <h3 className="text-sm font-bold text-destructive uppercase tracking-wider mb-2">Analysis Error</h3>
+            <p className="text-sm text-foreground/90">{error || "No analysis result available."}</p>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  const score = result.veracityIndex;
+  const verdict = result.verdict?.trim() || getVerdict(score, mode);
+  const fakePartReasons = result.fakeParts.map((text) => ({
+    text,
+    tag: mode === "verify" ? "Consistency" : "Scam",
+    positive: false,
+  })) as Array<{ text: string; tag: "Consistency" | "Scam"; positive: boolean }>;
+
   return (
     <div className="min-h-screen flex flex-col">
       <nav className="border-b border-border px-6 py-4">
@@ -112,78 +190,78 @@ const Results = () => {
             </div>
           </button>
           <div className="flex items-center gap-2">
-            <Chip variant={mode === "verify" ? "success" : "warning"}>
-              {mode === "verify" ? "Verify" : "Protect"}
-            </Chip>
+            <Chip variant={mode === "verify" ? "success" : "warning"}>{mode === "verify" ? "Verify" : "Protect"}</Chip>
           </div>
         </div>
       </nav>
 
       <main className="flex-1 px-6 py-8 max-w-2xl mx-auto w-full">
-        {/* Score + Verdict */}
         <div className="flex flex-col items-center mb-8 animate-fade-up">
           <Chip
-            variant={data.score >= 75 && mode === "verify" ? "success" : data.score < 40 && mode === "verify" ? "danger" : mode === "protect" && data.score >= 65 ? "danger" : "warning"}
+            variant={score >= 75 && mode === "verify" ? "success" : score < 40 && mode === "verify" ? "danger" : mode === "protect" && score >= 65 ? "danger" : "warning"}
             className="mb-4"
           >
             {verdict}
           </Chip>
-          <ScoreGauge score={data.score} label={mode === "verify" ? "Confidence" : "Risk Level"} />
+          <ScoreGauge score={score} label="Veracity Index" />
         </div>
 
-        {/* Reasons */}
         <section className="mb-8 animate-fade-up" style={{ animationDelay: "0.1s" }}>
+          <h3 className="text-sm font-bold text-foreground uppercase tracking-wider mb-3">Summary</h3>
+          <div className="rounded-xl border border-border bg-card p-4">
+            <p className="text-sm text-foreground/90 leading-relaxed">
+              {result.summary || "No summary returned by the model."}
+            </p>
+          </div>
+        </section>
+
+        <section className="mb-8 animate-fade-up" style={{ animationDelay: "0.14s" }}>
           <h3 className="text-sm font-bold text-foreground uppercase tracking-wider mb-3">Key Findings</h3>
           <div className="rounded-xl border border-border bg-card p-4 divide-y divide-border">
-            {data.reasons.map((r, i) => (
-              <ReasonBullet key={i} text={r.text} tag={r.tag} positive={r.positive} />
+            {(result.keyFindings.length > 0 ? result.keyFindings : ["No key findings returned."]).map((finding, i) => (
+              <ReasonBullet key={i} text={finding} tag="Source" positive={mode === "verify"} />
             ))}
           </div>
         </section>
 
-        {/* PII (Protect mode) */}
-        {mode === "protect" && "piiItems" in data && (
-          <section className="mb-8 animate-fade-up" style={{ animationDelay: "0.15s" }}>
-            <h3 className="text-sm font-bold text-foreground uppercase tracking-wider mb-3">PII Detected</h3>
-            <div className="flex flex-wrap gap-2">
-              {data.piiItems.map((item, i) => (
-                <div key={i} className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
-                  <Chip variant="warning">{item.type}</Chip>
-                  <span className="text-sm font-mono text-muted-foreground">{item.masked}</span>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
+        <section className="mb-8 animate-fade-up" style={{ animationDelay: "0.18s" }}>
+          <h3 className="text-sm font-bold text-foreground uppercase tracking-wider mb-3">Potentially Fake Parts</h3>
+          <div className="rounded-xl border border-border bg-card p-4 divide-y divide-border">
+            {(fakePartReasons.length > 0 ? fakePartReasons : [{ text: "No suspicious sections were explicitly flagged.", tag: "Consistency" as const, positive: true }]).map((part, i) => (
+              <ReasonBullet key={i} text={part.text} tag={part.tag} positive={part.positive} />
+            ))}
+          </div>
+        </section>
 
-        {/* Evidence (Verify mode) */}
-        {mode === "verify" && "evidence" in data && (
-          <section className="mb-8 animate-fade-up" style={{ animationDelay: "0.2s" }}>
-            <h3 className="text-sm font-bold text-foreground uppercase tracking-wider mb-3">Evidence Sources</h3>
-            <div className="space-y-3">
-              {data.evidence.map((e, i) => (
-                <EvidenceCard key={i} title={e.title} domain={e.domain} snippet={e.snippet} url={e.url} />
-              ))}
-            </div>
-          </section>
-        )}
+        <section className="mb-8 animate-fade-up" style={{ animationDelay: "0.22s" }}>
+          <h3 className="text-sm font-bold text-foreground uppercase tracking-wider mb-3">Evidence Sources</h3>
+          <div className="space-y-3">
+            {result.evidenceSources.length > 0 ? (
+              result.evidenceSources.map((e, i) => (
+                <EvidenceCard key={i} title={e.title} domain={getDomainFromUrl(e.url)} snippet={e.snippet} url={e.url} />
+              ))
+            ) : (
+              <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
+                No evidence links were returned for this input.
+              </div>
+            )}
+          </div>
+        </section>
 
-        {/* Next Steps */}
         <section className="mb-8 animate-fade-up" style={{ animationDelay: "0.25s" }}>
           <h3 className="text-sm font-bold text-foreground uppercase tracking-wider mb-3">Recommended Next Steps</h3>
           <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-            {data.nextSteps.map((step, i) => (
+            {(result.recommendedActions.length > 0 ? result.recommendedActions : ["Re-check with additional trusted sources before acting."]).map((nextStep, i) => (
               <div key={i} className="flex items-start gap-3">
                 <span className="w-5 h-5 rounded-full bg-primary/15 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
                   {i + 1}
                 </span>
-                <p className="text-sm text-foreground/90 leading-relaxed">{step}</p>
+                <p className="text-sm text-foreground/90 leading-relaxed">{nextStep}</p>
               </div>
             ))}
           </div>
         </section>
 
-        {/* Actions */}
         <div className="flex gap-3 animate-fade-up" style={{ animationDelay: "0.3s" }}>
           <button
             onClick={() => navigate("/")}
@@ -195,7 +273,17 @@ const Results = () => {
           <button
             onClick={() => {
               navigator.clipboard.writeText(
-                `Zeda ${mode === "verify" ? "Verification" : "Protection"} Report\nVerdict: ${verdict}\nScore: ${data.score}/100\n\nReasons:\n${data.reasons.map(r => `• ${r.text}`).join("\n")}`
+                [
+                  `Zeda ${mode === "verify" ? "Verification" : "Protection"} Report`,
+                  `Verdict: ${verdict}`,
+                  `Veracity Index: ${score}/100`,
+                  "",
+                  "Potentially Fake Parts:",
+                  ...(result.fakeParts.length ? result.fakeParts.map((part) => `- ${part}`) : ["- None identified"]),
+                  "",
+                  "Evidence Sources:",
+                  ...(result.evidenceSources.length ? result.evidenceSources.map((source) => `- ${source.title}: ${source.url}`) : ["- None"]),
+                ].join("\n"),
               );
             }}
             className="flex-1 py-3 rounded-xl font-semibold text-sm bg-primary text-primary-foreground hover:glow-primary-strong transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
