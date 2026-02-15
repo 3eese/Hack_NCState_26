@@ -53,6 +53,9 @@ type GeminiCandidate = {
 
 type GeminiGenerateContentResponse = {
     candidates?: GeminiCandidate[];
+    promptFeedback?: {
+        blockReason?: string;
+    };
 };
 
 type GeminiRawResponse = Partial<Omit<GeminiAnalysisResult, 'mode' | 'inputType' | 'model'>> & {
@@ -252,15 +255,24 @@ const buildPrompt = (mode: AnalysisMode): string => {
 };
 
 const parseModelText = (payload: GeminiGenerateContentResponse): string => {
-    const parts = payload.candidates?.[0]?.content?.parts;
-    if (!parts || parts.length === 0) {
-        return '';
+    const candidates = payload.candidates ?? [];
+    for (const candidate of candidates) {
+        const parts = candidate.content?.parts;
+        if (!parts || parts.length === 0) {
+            continue;
+        }
+
+        const text = parts
+            .map((part) => part.text ?? '')
+            .join('\n')
+            .trim();
+
+        if (text.length > 0) {
+            return text;
+        }
     }
 
-    return parts
-        .map((part) => part.text ?? '')
-        .join('\n')
-        .trim();
+    return '';
 };
 
 const parseApiErrorMessage = (errorText: string): string => {
@@ -326,6 +338,62 @@ const normalizeResult = (
         fakeParts,
         recommendedActions,
         evidenceSources,
+        model
+    };
+};
+
+const truncate = (value: string, maxLength: number): string =>
+    value.length <= maxLength ? value : `${value.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
+
+const buildFallbackResult = (
+    mode: AnalysisMode,
+    inputType: InputType,
+    content: string,
+    model: string,
+    payload: GeminiGenerateContentResponse
+): GeminiAnalysisResult => {
+    const groundedEvidence = sanitizeGroundedEvidence(payload.candidates?.[0]?.groundingMetadata);
+    const shortInput = truncate(content.replace(/\s+/g, ' ').trim(), 220);
+
+    const defaultScore = mode === 'verify' ? 45 : 55;
+    const summary = groundedEvidence.length > 0
+        ? 'Automated analysis returned no direct model text. Result is based on grounded web evidence and conservative fallback scoring.'
+        : 'Automated analysis returned no direct model text and no grounded evidence. Marking as unverified to avoid false confidence.';
+
+    const keyFindings = [
+        'Gemini returned an empty text output for this request.',
+        groundedEvidence.length > 0
+            ? `Grounding provided ${groundedEvidence.length} web source(s), but no final textual conclusion was generated.`
+            : 'No grounding sources were returned for this request.'
+    ];
+
+    const fakeParts = shortInput
+        ? [`Claim under review: "${shortInput}"`]
+        : ['Input could not be summarized from the request payload.'];
+
+    const recommendedActions = mode === 'verify'
+        ? [
+              'Re-run analysis in a few moments to fetch a full model response.',
+              'Cross-check this claim directly with official and major news sources.',
+              'Treat this claim as unverified until independent evidence is confirmed.'
+          ]
+        : [
+              'Re-run analysis in a few moments to fetch a full model response.',
+              'Do not act on urgent requests until the sender/site is independently verified.',
+              'Use trusted official channels before sharing personal information.'
+          ];
+
+    return {
+        mode,
+        inputType,
+        veracityIndex: defaultScore,
+        verdict: mode === 'verify' ? 'Unverified' : 'Medium Risk',
+        summary,
+        extractedText: inputType === 'image' ? '' : shortInput,
+        keyFindings,
+        fakeParts,
+        recommendedActions,
+        evidenceSources: groundedEvidence,
         model
     };
 };
@@ -421,10 +489,21 @@ export const analyzeInputWithGemini = async ({
             throw new GeminiRequestError(status, requestResult.message);
         }
 
-        const payload = requestResult.payload;
-        const modelText = parseModelText(payload);
+        let payload = requestResult.payload;
+        let modelText = parseModelText(payload);
+
+        // Some grounded responses can return citations without textual parts.
+        // Retry once without tools before falling back to a conservative structured result.
         if (!modelText) {
-            throw new GeminiRequestError(502, 'Gemini returned an empty response.');
+            const noToolRetry = await requestWithTools([]);
+            if (noToolRetry.ok) {
+                payload = noToolRetry.payload;
+                modelText = parseModelText(payload);
+            }
+        }
+
+        if (!modelText) {
+            return buildFallbackResult(mode, inputType, content, model, payload);
         }
 
         const jsonText = extractJsonString(modelText);
@@ -441,7 +520,7 @@ export const analyzeInputWithGemini = async ({
             throw error;
         }
         if (error instanceof Error && error.name === 'AbortError') {
-            throw new GeminiRequestError(504, 'Gemini analysis request timed out.');
+            return buildFallbackResult(mode, inputType, content, model, { candidates: [] });
         }
         throw error;
     } finally {
