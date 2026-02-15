@@ -1,9 +1,10 @@
 (() => {
   const ROOT_ID = "zeda-sidebar-root";
-  const UI_VERSION = "0.7.4";
+  const UI_VERSION = "0.7.6";
   const TOGGLE_EVENT = "zeda:toggle-sidebar";
   const STATE_OPEN_CLASS = "zeda-sidebar--open";
   const SHADOW_STYLE_FILE = "src/content/sidebar.css";
+  const LOGO_IMAGE_FILE = "resources/zeda_logo.png";
   const RUN_SCAN_ACTION = "zeda:run-scan";
   const CAPTURE_VISIBLE_TAB_ACTION = "zeda:capture-visible-tab";
   const EDGE_TRIGGER_PX = 16;
@@ -83,6 +84,19 @@
     return null;
   };
 
+  const formatSeconds = (ms) => {
+    const safeMs = Number.isFinite(ms) ? Math.max(0, ms) : 0;
+    const seconds = safeMs / 1000;
+    if (safeMs > 0 && seconds < 0.1) {
+      // Avoid misleading "0.0s" for very fast phases.
+      return "0.1s";
+    }
+    if (seconds >= 10) {
+      return `${Math.round(seconds)}s`;
+    }
+    return `${seconds.toFixed(1)}s`;
+  };
+
   const sanitizeDisplayText = (value, maxLength = 180) => {
     const trimmed = typeof value === "string" ? value.trim() : "";
     if (!trimmed) {
@@ -119,6 +133,91 @@
       .filter((item) => item.length > 0);
 
     return [...new Set(normalized)].slice(0, 3);
+  };
+
+  const buildTimingRows = (pipelineData) => {
+    const stepMs = pipelineData?.timings?.stepsMs;
+    const ingestMs = Number.isFinite(pipelineData?.ingest?.ms) ? Math.max(0, pipelineData.ingest.ms) : 0;
+    const analysisMs = Number.isFinite(pipelineData?.analysis?.ms) ? Math.max(0, pipelineData.analysis.ms) : 0;
+    const totalMs = Number.isFinite(pipelineData?.timings?.totalMs)
+      ? Math.max(0, pipelineData.timings.totalMs)
+      : ingestMs + analysisMs;
+
+    // Backward-compatible fallback for older worker payloads that do not include timings.stepsMs.
+    const extractingMs = Number.isFinite(stepMs?.extractingContent)
+      ? Math.max(0, stepMs.extractingContent)
+      : ingestMs;
+    const analyzingMs = Number.isFinite(stepMs?.analyzingClaimsOrRisk)
+      ? Math.max(0, stepMs.analyzingClaimsOrRisk)
+      : analysisMs;
+    const scoringMs = Number.isFinite(stepMs?.scoringAndReport)
+      ? Math.max(0, stepMs.scoringAndReport)
+      : Math.max(0, totalMs - extractingMs - analyzingMs);
+
+    return [
+      { label: "Extracting content...", seconds: formatSeconds(extractingMs) },
+      {
+        label: pipelineData?.mode === "protect" ? "Scanning privacy/scam risk..." : "Verifying claims...",
+        seconds: formatSeconds(analyzingMs)
+      },
+      { label: "Scoring & generating report...", seconds: formatSeconds(scoringMs) }
+    ];
+  };
+
+  const renderTimingSummary = (container, pipelineData) => {
+    const timingRows = buildTimingRows(pipelineData);
+    const timingList = createElement("ul", "zeda-sidebar__timing-list");
+    timingRows.forEach((row) => {
+      const item = createElement("li", "zeda-sidebar__timing-item");
+      const label = createElement("span", "zeda-sidebar__timing-label", row.label);
+      const value = createElement("span", "zeda-sidebar__timing-value", row.seconds);
+      item.appendChild(label);
+      item.appendChild(value);
+      timingList.appendChild(item);
+    });
+    container.appendChild(timingList);
+  };
+
+  const ensurePipelineTimings = (pipelineData, fallbackTotalMs) => {
+    if (!pipelineData || typeof pipelineData !== "object") {
+      return pipelineData;
+    }
+
+    const ingestMs = Number.isFinite(pipelineData?.ingest?.ms) ? Math.max(0, pipelineData.ingest.ms) : 0;
+    const analysisMs = Number.isFinite(pipelineData?.analysis?.ms) ? Math.max(0, pipelineData.analysis.ms) : 0;
+    const explicitTotalMs = Number.isFinite(pipelineData?.timings?.totalMs)
+      ? Math.max(0, pipelineData.timings.totalMs)
+      : null;
+    const totalMs = explicitTotalMs ?? Math.max(0, fallbackTotalMs, ingestMs + analysisMs);
+
+    if (!pipelineData.timings || typeof pipelineData.timings !== "object") {
+      pipelineData.timings = {};
+    }
+
+    if (!pipelineData.timings.stepsMs || typeof pipelineData.timings.stepsMs !== "object") {
+      pipelineData.timings.stepsMs = {};
+    }
+
+    if (!Number.isFinite(pipelineData.timings.stepsMs.extractingContent)) {
+      pipelineData.timings.stepsMs.extractingContent = ingestMs;
+    }
+    if (!Number.isFinite(pipelineData.timings.stepsMs.analyzingClaimsOrRisk)) {
+      pipelineData.timings.stepsMs.analyzingClaimsOrRisk = analysisMs;
+    }
+    if (!Number.isFinite(pipelineData.timings.stepsMs.scoringAndReport)) {
+      const extractingMs = Math.max(0, pipelineData.timings.stepsMs.extractingContent || 0);
+      const analyzingMs = Math.max(0, pipelineData.timings.stepsMs.analyzingClaimsOrRisk || 0);
+      pipelineData.timings.stepsMs.scoringAndReport = Math.max(0, totalMs - extractingMs - analyzingMs);
+    }
+
+    if (!Number.isFinite(pipelineData.timings.totalMs)) {
+      pipelineData.timings.totalMs =
+        pipelineData.timings.stepsMs.extractingContent +
+        pipelineData.timings.stepsMs.analyzingClaimsOrRisk +
+        pipelineData.timings.stepsMs.scoringAndReport;
+    }
+
+    return pipelineData;
   };
 
   const toDataUrl = (file) =>
@@ -291,17 +390,17 @@
 
     const header = createElement("header", "zeda-sidebar__header");
     const brand = createElement("div", "zeda-sidebar__brand");
-    const logoBadge = createElement("div", "zeda-sidebar__logo-badge", "Z");
-    const titleWrap = createElement("div", "zeda-sidebar__title-wrap");
-    const title = createElement("h2", "zeda-sidebar__title", "Zeda");
+    const logoBadge = createElement("div", "zeda-sidebar__logo-badge");
+    const logoImage = createElement("img", "zeda-sidebar__logo-image");
+    logoImage.src = chrome.runtime.getURL(LOGO_IMAGE_FILE);
+    logoImage.alt = "Zeda";
     const subtitle = createElement("p", "zeda-sidebar__subtitle", "Verify · Protect");
     const closeButton = createElement("button", "zeda-sidebar__close", "Close");
     closeButton.type = "button";
     closeButton.setAttribute("aria-label", "Close Zeda sidebar");
-    titleWrap.appendChild(title);
-    titleWrap.appendChild(subtitle);
+    logoBadge.appendChild(logoImage);
     brand.appendChild(logoBadge);
-    brand.appendChild(titleWrap);
+    brand.appendChild(subtitle);
     header.appendChild(brand);
     header.appendChild(closeButton);
 
@@ -547,21 +646,24 @@
       resultSection.scrollIntoView({ behavior: "smooth", block: "start" });
     };
 
-    const renderError = (message) => {
-      resultBox.innerHTML = "";
+    const renderError = (message, clearFirst = true) => {
+      if (clearFirst) {
+        resultBox.innerHTML = "";
+      }
       resultBox.appendChild(createElement("p", "zeda-sidebar__result-error", message));
     };
 
     const renderResult = (pipelineData) => {
       clearAnalysisProgress();
       const analysis = pipelineData?.analysis;
+      resultBox.innerHTML = "";
+      renderTimingSummary(resultBox, pipelineData);
 
       if (!analysis?.ok || !analysis?.data) {
-        renderError(analysis?.error || "No result returned from backend.");
+        renderError(analysis?.error || "No result returned from backend.", false);
         return false;
       }
 
-      resultBox.innerHTML = "";
       const data = analysis.data;
       const verdict = typeof data?.verdict === "string" && data.verdict.trim() ? data.verdict.trim() : "Unknown";
       const score = readNumericScore(data);
@@ -580,7 +682,7 @@
           list.appendChild(createElement("li", "zeda-sidebar__result-item", reason));
         });
         resultBox.appendChild(list);
-        return;
+        return true;
       }
 
       const fallbackSummary =
@@ -661,6 +763,7 @@
       startAnalysisProgress();
 
       try {
+        const startedAtMs = performance.now();
         // Keep backend calls in service worker to avoid exposing API details in page context.
         const response = await chrome.runtime.sendMessage({
           action: RUN_SCAN_ACTION,
@@ -671,6 +774,7 @@
             source: sourceOverride || `${activeInputType} input`
           }
         });
+        const totalRoundTripMs = performance.now() - startedAtMs;
 
         if (!response?.ok || !response?.data) {
           clearAnalysisProgress();
@@ -679,7 +783,8 @@
           return;
         }
 
-        const success = renderResult(response.data);
+        const pipelineData = ensurePipelineTimings(response.data, totalRoundTripMs);
+        const success = renderResult(pipelineData);
         if (success) {
           setStatus("Scan complete.", "success");
         } else {

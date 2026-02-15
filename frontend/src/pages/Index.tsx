@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ModeCard } from "@/components/ModeCard";
-import { Shield } from "lucide-react";
 import noirHero from "@/assets/noir-hero.jpg";
+
+const BRAND_LOGO_SRC = "/resources/zeda_logo.png";
 
 const Index = () => {
   const [selectedMode, setSelectedMode] = useState<"verify" | "protect" | null>(null);
@@ -27,10 +28,11 @@ const Index = () => {
       <nav className="relative z-10 glass-dark">
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-4">
           <div className="group flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-sharp bg-brass text-noir-base transition-all duration-300 group-hover:shadow-glow">
-              <Shield className="h-5 w-5" />
-            </div>
-            <span className="font-display text-2xl font-semibold tracking-tight text-foreground">Zeda</span>
+            <img
+              src={BRAND_LOGO_SRC}
+              alt="Zeda"
+              className="h-16 sm:h-20 w-auto rounded-sharp object-contain transition-all duration-300 group-hover:shadow-glow"
+            />
           </div>
           <span className="hidden text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground sm:block">
             Cognitive Firewall
