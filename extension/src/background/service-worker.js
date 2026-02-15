@@ -1,6 +1,7 @@
 const CONTENT_SCRIPT_FILE = "src/content/content-script.js";
 const TOGGLE_COMMAND = "toggle-zeda-sidebar";
 const RUN_SCAN_ACTION = "zeda:run-scan";
+const CAPTURE_VISIBLE_TAB_ACTION = "zeda:capture-visible-tab";
 const BACKEND_BASE_URL_STORAGE_KEY = "zedaBackendBaseUrl";
 const DEFAULT_BACKEND_BASE_URL = "http://localhost:8000";
 const DEFAULT_REQUEST_TIMEOUT_MS = 70000;
@@ -57,6 +58,27 @@ const injectSidebar = async (tab) => {
 const getActiveTab = async () => {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   return tabs[0];
+};
+
+const captureVisibleTab = async () => {
+  const activeTab = await getActiveTab();
+  if (!activeTab || typeof activeTab.windowId !== "number") {
+    throw new Error("No active tab available for capture.");
+  }
+
+  try {
+    // Use PNG for analysis quality and deterministic image parsing downstream.
+    return await chrome.tabs.captureVisibleTab(activeTab.windowId, { format: "png" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Screenshot capture failed.";
+    const lowerMessage = message.toLowerCase();
+    if (lowerMessage.includes("activeTab".toLowerCase()) || lowerMessage.includes("<all_urls>")) {
+      throw new Error(
+        "Screenshot permission blocked. Reload the extension in chrome://extensions, then set Site access to On all sites."
+      );
+    }
+    throw new Error(message);
+  }
 };
 
 const readPayloadText = (value) => {
@@ -262,24 +284,49 @@ chrome.commands.onCommand.addListener(async (command) => {
 
 // Content scripts ask the worker to run backend calls so page scripts never handle API credentials directly.
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!message || message.action !== RUN_SCAN_ACTION) {
+  if (!message || !message.action) {
     return false;
   }
 
-  (async () => {
-    try {
-      const pipelineResult = await runScanPipeline(message.payload ?? {});
-      sendResponse({
-        ok: true,
-        data: pipelineResult
-      });
-    } catch (error) {
-      sendResponse({
-        ok: false,
-        error: error instanceof Error ? error.message : "Unknown scan error."
-      });
-    }
-  })();
+  if (message.action === RUN_SCAN_ACTION) {
+    (async () => {
+      try {
+        const pipelineResult = await runScanPipeline(message.payload ?? {});
+        sendResponse({
+          ok: true,
+          data: pipelineResult
+        });
+      } catch (error) {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : "Unknown scan error."
+        });
+      }
+    })();
 
-  return true;
+    return true;
+  }
+
+  if (message.action === CAPTURE_VISIBLE_TAB_ACTION) {
+    (async () => {
+      try {
+        const dataUrl = await captureVisibleTab();
+        sendResponse({
+          ok: true,
+          data: {
+            dataUrl
+          }
+        });
+      } catch (error) {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : "Screenshot capture failed."
+        });
+      }
+    })();
+
+    return true;
+  }
+
+  return false;
 });

@@ -1,14 +1,17 @@
 (() => {
   const ROOT_ID = "zeda-sidebar-root";
-  const UI_VERSION = "0.6.3";
+  const UI_VERSION = "0.7.4";
   const TOGGLE_EVENT = "zeda:toggle-sidebar";
   const STATE_OPEN_CLASS = "zeda-sidebar--open";
   const SHADOW_STYLE_FILE = "src/content/sidebar.css";
   const RUN_SCAN_ACTION = "zeda:run-scan";
+  const CAPTURE_VISIBLE_TAB_ACTION = "zeda:capture-visible-tab";
   const EDGE_TRIGGER_PX = 16;
   const EDGE_TRIGGER_VERTICAL_PADDING_PX = 20;
   const EDGE_TRIGGER_COOLDOWN_MS = 500;
   const ANALYSIS_STEP_INTERVAL_MS = 900;
+  const MIN_CAPTURE_SELECTION_PX = 12;
+  const CAPTURE_PANEL_HIDE_DELAY_MS = 280;
 
   const existingHost = document.getElementById(ROOT_ID);
   if (existingHost) {
@@ -143,6 +146,142 @@
     }
   };
 
+  const requestVisibleTabCapture = async () => {
+    const response = await chrome.runtime.sendMessage({
+      action: CAPTURE_VISIBLE_TAB_ACTION
+    });
+
+    if (!response?.ok || !response?.data?.dataUrl) {
+      throw new Error(
+        typeof response?.error === "string" ? response.error : "Unable to capture the current tab screenshot."
+      );
+    }
+
+    return response.data.dataUrl;
+  };
+
+  const loadImageElement = (dataUrl) =>
+    new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("Failed to decode captured screenshot."));
+      image.src = dataUrl;
+    });
+
+  const cropDataUrlByViewportRect = async (dataUrl, rect) => {
+    const image = await loadImageElement(dataUrl);
+
+    const scaleX = image.naturalWidth / Math.max(1, window.innerWidth);
+    const scaleY = image.naturalHeight / Math.max(1, window.innerHeight);
+    const sx = Math.max(0, Math.floor(rect.x * scaleX));
+    const sy = Math.max(0, Math.floor(rect.y * scaleY));
+    const sw = Math.max(1, Math.floor(rect.width * scaleX));
+    const sh = Math.max(1, Math.floor(rect.height * scaleY));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = sw;
+    canvas.height = sh;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("Unable to initialize screenshot crop canvas.");
+    }
+
+    context.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+    return canvas.toDataURL("image/png");
+  };
+
+  const pickSelectionRectFromOverlay = () =>
+    new Promise((resolve, reject) => {
+      const overlay = document.createElement("div");
+      overlay.setAttribute("aria-label", "Zeda screenshot selection overlay");
+      Object.assign(overlay.style, {
+        position: "fixed",
+        inset: "0",
+        zIndex: "2147483647",
+        cursor: "crosshair",
+        background: "rgba(8, 6, 4, 0.28)"
+      });
+
+      const selection = document.createElement("div");
+      Object.assign(selection.style, {
+        position: "absolute",
+        border: "2px solid rgba(255, 201, 88, 0.95)",
+        boxShadow: "0 0 0 99999px rgba(8, 6, 4, 0.45)",
+        borderRadius: "6px",
+        pointerEvents: "none",
+        display: "none"
+      });
+      overlay.appendChild(selection);
+
+      let startX = 0;
+      let startY = 0;
+      let dragging = false;
+
+      const cleanup = () => {
+        window.removeEventListener("keydown", onKeyDown, true);
+        overlay.remove();
+      };
+
+      const buildRect = (x, y) => {
+        const left = Math.min(startX, x);
+        const top = Math.min(startY, y);
+        const width = Math.abs(x - startX);
+        const height = Math.abs(y - startY);
+        return { x: left, y: top, width, height };
+      };
+
+      const renderRect = ({ x, y, width, height }) => {
+        selection.style.display = "block";
+        selection.style.left = `${x}px`;
+        selection.style.top = `${y}px`;
+        selection.style.width = `${width}px`;
+        selection.style.height = `${height}px`;
+      };
+
+      const onKeyDown = (event) => {
+        if (event.key !== "Escape") {
+          return;
+        }
+        cleanup();
+        reject(new Error("Capture area selection canceled."));
+      };
+
+      overlay.addEventListener("mousedown", (event) => {
+        dragging = true;
+        startX = event.clientX;
+        startY = event.clientY;
+        renderRect({ x: startX, y: startY, width: 0, height: 0 });
+        event.preventDefault();
+      });
+
+      overlay.addEventListener("mousemove", (event) => {
+        if (!dragging) {
+          return;
+        }
+        renderRect(buildRect(event.clientX, event.clientY));
+      });
+
+      overlay.addEventListener("mouseup", (event) => {
+        if (!dragging) {
+          return;
+        }
+
+        dragging = false;
+        const rect = buildRect(event.clientX, event.clientY);
+        cleanup();
+
+        if (rect.width < MIN_CAPTURE_SELECTION_PX || rect.height < MIN_CAPTURE_SELECTION_PX) {
+          reject(new Error("Selected area is too small. Drag a larger area."));
+          return;
+        }
+
+        resolve(rect);
+      });
+
+      window.addEventListener("keydown", onKeyDown, true);
+      document.documentElement.appendChild(overlay);
+    });
+
   const mountSidebar = async () => {
     await loadSidebarStyles();
 
@@ -194,7 +333,25 @@
     modeSection.appendChild(modeGrid);
 
     const inputSection = createElement("section", "zeda-sidebar__section");
+    const inputHeader = createElement("div", "zeda-sidebar__section-heading");
     const inputTitle = createElement("h3", "zeda-sidebar__section-title", "Upload Data");
+    const captureMenuWrap = createElement("div", "zeda-sidebar__capture-menu-wrap");
+    const captureMenuButton = createElement("button", "zeda-sidebar__capture-trigger", "📋");
+    captureMenuButton.type = "button";
+    captureMenuButton.setAttribute("aria-label", "Screenshot options");
+    captureMenuButton.setAttribute("aria-expanded", "false");
+    const captureMenu = createElement("div", "zeda-sidebar__capture-menu");
+    captureMenu.hidden = true;
+    const captureFullMenuButton = createElement("button", "zeda-sidebar__capture-option", "Entire screen");
+    captureFullMenuButton.type = "button";
+    const captureAreaMenuButton = createElement("button", "zeda-sidebar__capture-option", "Portion of screen");
+    captureAreaMenuButton.type = "button";
+    captureMenu.appendChild(captureFullMenuButton);
+    captureMenu.appendChild(captureAreaMenuButton);
+    captureMenuWrap.appendChild(captureMenuButton);
+    captureMenuWrap.appendChild(captureMenu);
+    inputHeader.appendChild(inputTitle);
+    inputHeader.appendChild(captureMenuWrap);
 
     const inputTabs = createElement("div", "zeda-sidebar__tabs");
     const imageTabButton = createElement("button", "zeda-sidebar__tab-btn", "Image");
@@ -238,7 +395,7 @@
     const scanButton = createElement("button", "zeda-sidebar__button zeda-sidebar__button--primary", "Analyze");
     scanButton.type = "button";
 
-    inputSection.appendChild(inputTitle);
+    inputSection.appendChild(inputHeader);
     inputSection.appendChild(inputTabs);
     inputSection.appendChild(imagePanel);
     inputSection.appendChild(urlPanel);
@@ -267,6 +424,9 @@
     let activeInputType = "text";
     let imageDataUrl = "";
     let isRunning = false;
+    let isSelectingArea = false;
+    let isCaptureFlowActive = false;
+    let isCaptureMenuOpen = false;
     let lastEdgeTriggerAt = 0;
     let progressIntervalId = null;
 
@@ -298,10 +458,45 @@
       urlTabButton.disabled = running;
       textTabButton.disabled = running;
       imageFileInput.disabled = running;
+      captureMenuButton.disabled = running;
+      captureFullMenuButton.disabled = running;
+      captureAreaMenuButton.disabled = running;
       urlInput.disabled = running;
       textInput.disabled = running;
       scanButton.disabled = running;
       scanButton.textContent = running ? "Analyzing..." : "Analyze";
+    };
+
+    const closeCaptureMenu = () => {
+      isCaptureMenuOpen = false;
+      captureMenu.hidden = true;
+      captureMenuButton.classList.remove("zeda-sidebar__capture-trigger--open");
+      captureMenuButton.setAttribute("aria-expanded", "false");
+    };
+
+    const openCaptureMenu = () => {
+      isCaptureMenuOpen = true;
+      captureMenu.hidden = false;
+      captureMenuButton.classList.add("zeda-sidebar__capture-trigger--open");
+      captureMenuButton.setAttribute("aria-expanded", "true");
+    };
+
+    const toggleCaptureMenu = () => {
+      if (isCaptureMenuOpen) {
+        closeCaptureMenu();
+        return;
+      }
+      openCaptureMenu();
+    };
+
+    const applyImageDataUrl = ({ dataUrl, titleText, hintText }) => {
+      imageDataUrl = dataUrl;
+      imagePreview.src = dataUrl;
+      imagePreview.hidden = false;
+      imageUploadTitle.textContent = titleText;
+      imageUploadHint.textContent = hintText;
+      setInputTab("image");
+      updateScanState();
     };
 
     const clearAnalysisProgress = () => {
@@ -444,7 +639,7 @@
       scanButton.disabled = !selectedMode || !payload;
     };
 
-    const runScan = async () => {
+    const runScan = async (sourceOverride) => {
       if (isRunning) {
         return;
       }
@@ -473,7 +668,7 @@
             mode: selectedMode,
             inputType: payload.inputType,
             content: payload.content,
-            source: `${activeInputType} input`
+            source: sourceOverride || `${activeInputType} input`
           }
         });
 
@@ -510,6 +705,119 @@
     textInput.addEventListener("input", updateScanState);
     urlInput.addEventListener("input", updateScanState);
 
+    const captureFullViewAndAnalyze = async () => {
+      if (isRunning) {
+        return;
+      }
+      if (!selectedMode) {
+        setStatus("Choose Protect or Verify before capture.", "warning");
+        return;
+      }
+
+      try {
+        setStatus("Capturing full view...", "success");
+        closeCaptureMenu();
+        isCaptureFlowActive = true;
+        setOpenState(false);
+        await new Promise((resolve) => window.setTimeout(resolve, CAPTURE_PANEL_HIDE_DELAY_MS));
+
+        const fullViewDataUrl = await requestVisibleTabCapture();
+        setOpenState(true);
+        applyImageDataUrl({
+          dataUrl: fullViewDataUrl,
+          titleText: "Screenshot captured",
+          hintText: "Full visible page view"
+        });
+        setStatus("Full view captured. Analyzing...", "success");
+        await runScan("captured full view");
+      } catch (error) {
+        setOpenState(true);
+        setStatus(error instanceof Error ? error.message : "Failed to capture full view screenshot.", "warning");
+      } finally {
+        isCaptureFlowActive = false;
+      }
+    };
+
+    const captureAreaAndAnalyze = async () => {
+      if (isRunning) {
+        return;
+      }
+      if (!selectedMode) {
+        setStatus("Choose Protect or Verify before capture.", "warning");
+        return;
+      }
+
+      try {
+        setStatus("Select area to capture. Press ESC to cancel.", "success");
+        closeCaptureMenu();
+        isCaptureFlowActive = true;
+        setOpenState(false);
+        isSelectingArea = true;
+
+        // Let the panel slide away before drawing the selection overlay.
+        await new Promise((resolve) => window.setTimeout(resolve, CAPTURE_PANEL_HIDE_DELAY_MS));
+
+        const fullViewDataUrl = await requestVisibleTabCapture();
+        const selectionRect = await pickSelectionRectFromOverlay();
+        const croppedDataUrl = await cropDataUrlByViewportRect(fullViewDataUrl, selectionRect);
+
+        setOpenState(true);
+        applyImageDataUrl({
+          dataUrl: croppedDataUrl,
+          titleText: "Area captured",
+          hintText: `${Math.round(selectionRect.width)} x ${Math.round(selectionRect.height)} selection`
+        });
+        setStatus("Area captured. Analyzing...", "success");
+        await runScan("captured area");
+      } catch (error) {
+        setOpenState(true);
+        setStatus(error instanceof Error ? error.message : "Failed to capture selected area.", "warning");
+      } finally {
+        isSelectingArea = false;
+        isCaptureFlowActive = false;
+      }
+    };
+
+    const handleClipboardPaste = async (event) => {
+      if (isRunning || activeInputType !== "image") {
+        return;
+      }
+
+      const clipboard = event.clipboardData;
+      if (!clipboard?.items?.length) {
+        return;
+      }
+
+      const imageItem = [...clipboard.items].find((item) => item.type.startsWith("image/"));
+      if (!imageItem) {
+        return;
+      }
+
+      const imageFile = imageItem.getAsFile();
+      if (!imageFile) {
+        return;
+      }
+
+      event.preventDefault();
+      try {
+        const pastedDataUrl = await toDataUrl(imageFile);
+        applyImageDataUrl({
+          dataUrl: pastedDataUrl,
+          titleText: "Clipboard image ready",
+          hintText: imageFile.name || "Pasted screenshot"
+        });
+
+        if (selectedMode) {
+          setStatus("Clipboard image captured. Analyzing...", "success");
+          await runScan("clipboard screenshot");
+        } else {
+          setStatus("Clipboard image loaded. Choose mode then Analyze.");
+        }
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "Failed to read clipboard image.", "warning");
+      }
+    };
+
     imageFileInput.addEventListener("change", async (event) => {
       const file = event.target?.files?.[0];
       if (!file) {
@@ -517,11 +825,12 @@
       }
 
       try {
-        imageDataUrl = await toDataUrl(file);
-        imagePreview.src = imageDataUrl;
-        imagePreview.hidden = false;
-        imageUploadTitle.textContent = "Image ready for analysis";
-        imageUploadHint.textContent = file.name;
+        const fileDataUrl = await toDataUrl(file);
+        applyImageDataUrl({
+          dataUrl: fileDataUrl,
+          titleText: "Image ready for analysis",
+          hintText: file.name
+        });
         setStatus("Image loaded.");
       } catch (error) {
         imageDataUrl = "";
@@ -532,13 +841,25 @@
       }
     });
 
-    scanButton.addEventListener("click", runScan);
+    captureMenuButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleCaptureMenu();
+    });
+    captureFullMenuButton.addEventListener("click", captureFullViewAndAnalyze);
+    captureAreaMenuButton.addEventListener("click", captureAreaAndAnalyze);
+    scanButton.addEventListener("click", () => runScan());
+    window.addEventListener("paste", handleClipboardPaste, true);
 
     closeButton.addEventListener("click", () => {
+      closeCaptureMenu();
       setOpenState(false);
     });
 
     const handleEdgeHoverOpen = (event) => {
+      if (isSelectingArea || isCaptureFlowActive) {
+        return;
+      }
       if (host.classList.contains(STATE_OPEN_CLASS)) {
         return;
       }
@@ -561,13 +882,19 @@
     };
 
     const handleGlobalClickClose = (event) => {
+      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+      const clickedCaptureControl = path.includes(captureMenuWrap) || path.includes(captureMenuButton) || path.includes(captureMenu);
+      if (isCaptureMenuOpen && !clickedCaptureControl) {
+        closeCaptureMenu();
+      }
+
       if (!host.classList.contains(STATE_OPEN_CLASS)) {
         return;
       }
 
-      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
-      const clickedInside = path.includes(host) || path.includes(panel);
-      if (!clickedInside) {
+      const clickedInsideSidebar = path.includes(host) || path.includes(panel);
+      if (!clickedInsideSidebar) {
+        closeCaptureMenu();
         setOpenState(false);
       }
     };
