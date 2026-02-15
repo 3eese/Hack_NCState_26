@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ModeCard } from "@/components/ModeCard";
-import { Zap } from "lucide-react";
 import noirHero from "@/assets/noir-hero.jpg";
 
 const Index = () => {
@@ -28,7 +27,7 @@ const Index = () => {
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
-              <Zap className="w-4 h-4 text-primary" />
+              <img src="/zeda-logo.svg" alt="Zeda" className="w-4 h-4" />
             </div>
             <span className="text-lg font-bold text-foreground tracking-tight font-display">Zeda</span>
           </div>
