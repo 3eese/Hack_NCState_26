@@ -3,9 +3,11 @@ const TOGGLE_COMMAND = "toggle-zeda-sidebar";
 const RUN_SCAN_ACTION = "zeda:run-scan";
 const BACKEND_BASE_URL_STORAGE_KEY = "zedaBackendBaseUrl";
 const DEFAULT_BACKEND_BASE_URL = "http://localhost:8000";
-const DEFAULT_REQUEST_TIMEOUT_MS = 18000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 70000;
+const DEFAULT_INGEST_TIMEOUT_MS = 25000;
 
 const VALID_INPUT_TYPES = new Set(["text", "url", "image"]);
+const VALID_MODES = new Set(["verify", "protect"]);
 
 const normalizeBaseUrl = (rawBaseUrl) => {
   const fallback = DEFAULT_BACKEND_BASE_URL;
@@ -64,6 +66,18 @@ const readPayloadText = (value) => {
   return value.trim();
 };
 
+const createSkippedIngestResult = (reason) => ({
+  ok: true,
+  status: 0,
+  ms: 0,
+  data: {
+    normalizedPayload: null,
+    skipped: true,
+    reason
+  },
+  error: null
+});
+
 const buildAnalysisPayload = (inputType, content, ingestData) => {
   const normalizedPayload = ingestData?.normalizedPayload ?? null;
   const normalizedText = readPayloadText(normalizedPayload?.text);
@@ -87,13 +101,27 @@ const buildAnalysisPayload = (inputType, content, ingestData) => {
   return body;
 };
 
+const buildDirectPayload = (inputType, content) => {
+  const body = {
+    inputType,
+    content
+  };
+
+  if (inputType === "url") {
+    body.url = content;
+  }
+
+  return body;
+};
+
 const callJsonEndpoint = async (baseUrl, path, payload, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const startedAt = Date.now();
+  const endpointUrl = `${baseUrl}${path}`;
 
   try {
-    const response = await fetch(`${baseUrl}${path}`, {
+    const response = await fetch(endpointUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -129,7 +157,7 @@ const callJsonEndpoint = async (baseUrl, path, payload, timeoutMs = DEFAULT_REQU
     const durationMs = Date.now() - startedAt;
     const message =
       error instanceof Error && error.name === "AbortError"
-        ? "Request timed out."
+        ? `Request timed out after ${Math.round(timeoutMs / 1000)}s (${endpointUrl}).`
         : error instanceof Error
           ? error.message
           : "Unknown request failure.";
@@ -146,7 +174,11 @@ const callJsonEndpoint = async (baseUrl, path, payload, timeoutMs = DEFAULT_REQU
   }
 };
 
-const runScanPipeline = async ({ inputType, content, source }) => {
+const runScanPipeline = async ({ mode, inputType, content, source }) => {
+  if (!VALID_MODES.has(mode)) {
+    throw new Error("Unsupported mode. Expected verify or protect.");
+  }
+
   if (!VALID_INPUT_TYPES.has(inputType)) {
     throw new Error("Unsupported inputType. Expected text, url, or image.");
   }
@@ -159,50 +191,54 @@ const runScanPipeline = async ({ inputType, content, source }) => {
   const baseUrl = await resolveBackendBaseUrl();
   const startedAt = Date.now();
 
-  const ingestResult = await callJsonEndpoint(baseUrl, "/api/ingest", {
-    inputType,
-    content: normalizedContent
-  });
+  // Route selection:
+  // - URL: try ingest first (scraping), then analyze normalized text. If ingest fails, fall back to direct URL analysis.
+  // - Text/Image: skip ingest and analyze directly to reduce latency and avoid OCR dependency failures for images.
+  const shouldUseIngest = inputType === "url";
+  let ingestResult = shouldUseIngest
+    ? await callJsonEndpoint(baseUrl, "/api/ingest", {
+        inputType,
+        content: normalizedContent
+      }, DEFAULT_INGEST_TIMEOUT_MS)
+    : createSkippedIngestResult(`Ingest skipped for ${inputType} input.`);
 
-  let verifyResult = {
+  let analysisResult = {
     ok: false,
     status: 0,
     ms: 0,
     data: null,
-    error: "Verify was skipped because ingest failed."
-  };
-  let protectResult = {
-    ok: false,
-    status: 0,
-    ms: 0,
-    data: null,
-    error: "Protect was skipped because ingest failed."
+    error: `${mode} was skipped because ingest failed.`
   };
 
-  if (ingestResult.ok) {
+  if (shouldUseIngest && ingestResult.ok) {
     const analysisPayload = buildAnalysisPayload(inputType, normalizedContent, ingestResult.data);
+    const endpointPath = mode === "verify" ? "/api/verify" : "/api/protect";
 
-    // Verify and Protect are independent after ingest and can run in parallel.
-    const [verifyResponse, protectResponse] = await Promise.all([
-      callJsonEndpoint(baseUrl, "/api/verify", analysisPayload),
-      callJsonEndpoint(baseUrl, "/api/protect", analysisPayload)
-    ]);
+    // Run the selected engine on normalized ingest output.
+    analysisResult = await callJsonEndpoint(baseUrl, endpointPath, analysisPayload);
+  } else {
+    const endpointPath = mode === "verify" ? "/api/verify" : "/api/protect";
+    const directPayload = buildDirectPayload(inputType, normalizedContent);
 
-    verifyResult = verifyResponse;
-    protectResult = protectResponse;
+    // Fallback or direct flow: always attempt selected engine even if ingest fails/skips.
+    analysisResult = await callJsonEndpoint(baseUrl, endpointPath, directPayload);
+
+    if (shouldUseIngest && !ingestResult.ok && !analysisResult.ok) {
+      analysisResult.error = `Ingest failed (${ingestResult.error || "unknown"}) and ${mode} analysis failed (${analysisResult.error || "unknown"}).`;
+    }
   }
 
   const finishedAt = Date.now();
   return {
     backendBaseUrl: baseUrl,
+    mode,
     input: {
       inputType,
       source,
       contentPreview: normalizedContent.slice(0, 280)
     },
     ingest: ingestResult,
-    verify: verifyResult,
-    protect: protectResult,
+    analysis: analysisResult,
     timings: {
       totalMs: finishedAt - startedAt
     }

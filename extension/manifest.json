@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Zeda Sidebar",
-  "version": "0.3.0",
+  "version": "0.6.3",
   "description": "Injects a Zeda sliding sidebar into the active page.",
   "permissions": ["activeTab", "scripting", "storage", "tabs"],
   "host_permissions": ["http://localhost:8000/*", "http://127.0.0.1:8000/*", "https://*/*"],
