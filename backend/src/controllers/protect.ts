@@ -1,7 +1,8 @@
 import type { Request, Response } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
-import { analyzeInputWithGemini, GeminiRequestError } from '../lib/gemini';
+import { analyzeInputWithGemini, GeminiRequestError, type GeminiAnalysisResult } from '../lib/gemini';
+import { extractTextFromImage, OpenAIRequestError } from '../lib/openai';
 
 const normalizeInputType = (value: unknown): 'text' | 'url' | 'image' | null => {
     if (typeof value !== 'string') {
@@ -74,6 +75,17 @@ class ProtectError extends Error {
     }
 }
 
+const IMAGE_DATA_URL_REGEX = /^data:image\/[a-z0-9.+-]+;base64,/i;
+const DEFAULT_PROTECT_MODEL_TIMEOUT_MS = 9000;
+const PROTECT_MODEL_TIMEOUT_MS = (() => {
+    const raw = Number(process.env.PROTECT_MODEL_TIMEOUT_MS ?? process.env.GEMINI_PROTECT_TIMEOUT_MS);
+    if (Number.isFinite(raw) && raw > 0) {
+        return raw;
+    }
+    return DEFAULT_PROTECT_MODEL_TIMEOUT_MS;
+})();
+const USE_GEMINI_PROTECT_MODEL = (process.env.PROTECT_USE_GEMINI_MODEL ?? '').toLowerCase() === 'true';
+
 const normalizeWhitespace = (value: string): string =>
     value
         .replace(/\r/g, '\n')
@@ -111,8 +123,26 @@ const readTextFromBody = (body: ProtectRequestBody): string => {
             continue;
         }
         const normalized = normalizeWhitespace(candidate);
+        // Base64 image payload is not useful for heuristic text checks.
+        if (IMAGE_DATA_URL_REGEX.test(normalized)) {
+            continue;
+        }
         if (normalized.length > 0) {
             return normalized.slice(0, 12000);
+        }
+    }
+    return '';
+};
+
+const readRawContent = (body: ProtectRequestBody): string => {
+    const candidates = [body.content, body.text, body.normalizedPayload?.text];
+    for (const candidate of candidates) {
+        if (typeof candidate !== 'string') {
+            continue;
+        }
+        const trimmed = candidate.trim();
+        if (trimmed.length > 0) {
+            return trimmed;
         }
     }
     return '';
@@ -222,8 +252,13 @@ const URGENCY_PATTERNS = [
     /action required/i,
     /within (?:24|48) hours/i,
     /final notice/i,
+    /final reminder/i,
+    /last warning/i,
+    /by (?:\w{3},?\s*)?\d{1,2}\s+\w{3}\s+\d{4}/i,
     /suspend(ed|ing)/i,
-    /account (?:locked|limited|suspended)/i
+    /account (?:locked|limited|suspended)/i,
+    /data (?:will be|is) (?:deleted|removed)/i,
+    /permanently removed/i
 ];
 
 const CREDENTIAL_PATTERNS = [
@@ -244,7 +279,11 @@ const PAYMENT_PATTERNS = [
     /crypto/i,
     /bitcoin|ethereum|usdt/i,
     /payment required/i,
-    /invoice/i
+    /invoice/i,
+    /update payment/i,
+    /payment method (?:has )?expired/i,
+    /renew(?:al)?/i,
+    /subscription/i
 ];
 
 const buildPhishingFlags = (text: string): PhishingFlag[] => {
@@ -280,6 +319,14 @@ const buildPhishingFlags = (text: string): PhishingFlag[] => {
             type: 'Call-to-action link',
             description: 'Message encourages clicking a link, which is common in phishing.',
             severity: 'medium'
+        });
+    }
+
+    if (/what you could lose|to prevent data loss|secure my data|data (?:is|will be) (?:removed|deleted)/i.test(normalized)) {
+        flags.push({
+            type: 'Data loss threat',
+            description: 'Message uses data-loss fear to push immediate action.',
+            severity: 'high'
         });
     }
 
@@ -761,15 +808,314 @@ const summarizeRiskLevel = (score: number): 'Low' | 'Medium' | 'High' => {
     return 'Low';
 };
 
+const severityWeight = (severity: 'low' | 'medium' | 'high'): number => {
+    if (severity === 'high') {
+        return 34;
+    }
+    if (severity === 'medium') {
+        return 22;
+    }
+    return 10;
+};
+
+const computePhishingRiskScore = (
+    phishingFlags: PhishingFlag[],
+    lookalikeMatches: LookalikeMatch[],
+    urlCount: number
+): number => {
+    let score = 0;
+
+    for (const flag of phishingFlags) {
+        score += severityWeight(flag.severity);
+    }
+    for (const match of lookalikeMatches) {
+        score += Math.round(severityWeight(match.severity) * 0.9);
+    }
+
+    const hasUrgency = phishingFlags.some((flag) => flag.type === 'Urgency & pressure');
+    const hasCta = phishingFlags.some((flag) => flag.type === 'Call-to-action link');
+    const hasCredential = phishingFlags.some((flag) => flag.type === 'Credential request');
+    const hasPayment = phishingFlags.some((flag) => flag.type === 'Payment pressure');
+    const hasDataLossThreat = phishingFlags.some((flag) => flag.type === 'Data loss threat');
+    const highSeverityCount = phishingFlags.filter((flag) => flag.severity === 'high').length;
+
+    if (hasUrgency && hasCta) {
+        score += 12;
+    }
+    if (hasCredential && hasCta) {
+        score += 15;
+    }
+    if (hasPayment && hasCta) {
+        score += 10;
+    }
+    if (lookalikeMatches.length > 0 && phishingFlags.length > 0) {
+        score += 10;
+    }
+    if (urlCount >= 3) {
+        score += 5;
+    }
+
+    // Critical scam combo: urgency + money/credential ask + action CTA + data-loss fear.
+    if (hasUrgency && hasCta && (hasPayment || hasCredential) && hasDataLossThreat) {
+        score += 30;
+    }
+
+    // Multiple high-severity indicators should push closer to max risk.
+    if (highSeverityCount >= 2 && hasCta) {
+        score += 18;
+    }
+
+    return clamp(score, 0, 100);
+};
+
+const hasCriticalScamPattern = (phishingFlags: PhishingFlag[]): boolean => {
+    const hasUrgency = phishingFlags.some((flag) => flag.type === 'Urgency & pressure');
+    const hasCta = phishingFlags.some((flag) => flag.type === 'Call-to-action link');
+    const hasCredential = phishingFlags.some((flag) => flag.type === 'Credential request');
+    const hasPayment = phishingFlags.some((flag) => flag.type === 'Payment pressure');
+    const hasDataLossThreat = phishingFlags.some((flag) => flag.type === 'Data loss threat');
+    return hasUrgency && hasCta && (hasPayment || hasCredential) && hasDataLossThreat;
+};
+
+const toProtectVerdict = (score: number): 'High Risk' | 'Medium Risk' | 'Low Risk' => {
+    if (score >= 65) {
+        return 'High Risk';
+    }
+    if (score >= 35) {
+        return 'Medium Risk';
+    }
+    return 'Low Risk';
+};
+
+const buildProtectSummary = (
+    verdict: string,
+    phishingFlagsCount: number,
+    piiCount: number,
+    trackersFound: number
+): string => {
+    return [
+        `${verdict} signal based on scam and privacy heuristics.`,
+        `Detected ${phishingFlagsCount} phishing indicator(s), ${piiCount} PII match(es), and ${trackersFound} tracker domain(s).`
+    ].join(' ');
+};
+
+const buildProtectKeyFindings = (
+    phishingFlags: PhishingFlag[],
+    lookalikeMatches: LookalikeMatch[],
+    detections: PiiDetection[],
+    trackerAudit: {
+        trackersFound: number;
+        thirdPartyCount: number;
+        trackerMatches: TrackerMatch[];
+    }
+): string[] => {
+    const findings: string[] = [];
+
+    if (phishingFlags.length > 0) {
+        findings.push(`Phishing heuristics flagged ${phishingFlags.length} suspicious pattern(s).`);
+    }
+
+    if (lookalikeMatches.length > 0) {
+        findings.push(`Detected ${lookalikeMatches.length} lookalike or suspicious URL signal(s).`);
+    }
+
+    if (detections.length > 0) {
+        const piiSummary = detections.map((entry) => `${entry.type}:${entry.count}`).join(', ');
+        findings.push(`PII patterns detected (${piiSummary}).`);
+    }
+
+    if (trackerAudit.trackersFound > 0) {
+        findings.push(
+            `Tracker audit matched ${trackerAudit.trackersFound} tracker domain(s) across ${trackerAudit.thirdPartyCount} third-party resource(s).`
+        );
+    }
+
+    if (findings.length === 0) {
+        findings.push('No strong phishing, PII, or tracking indicators were detected.');
+    }
+
+    return findings.slice(0, 6);
+};
+
+const buildProtectFakeParts = (
+    phishingFlags: PhishingFlag[],
+    lookalikeMatches: LookalikeMatch[],
+    detections: PiiDetection[]
+): string[] => {
+    const parts: string[] = [];
+
+    for (const flag of phishingFlags) {
+        parts.push(`${flag.type}: ${flag.description}`);
+    }
+
+    for (const match of lookalikeMatches) {
+        parts.push(`URL ${match.hostname} flagged: ${match.reason}`);
+    }
+
+    for (const detection of detections) {
+        parts.push(`PII exposure risk: ${detection.type} detected ${detection.count} time(s).`);
+    }
+
+    return parts.slice(0, 10);
+};
+
+const buildProtectRecommendedActions = (
+    score: number,
+    lookalikeMatches: LookalikeMatch[],
+    detections: PiiDetection[],
+    trackerAudit: { trackersFound: number }
+): string[] => {
+    const actions: string[] = [];
+
+    if (score >= 65) {
+        actions.push('Avoid clicking links or sharing credentials until the source is independently verified.');
+    }
+
+    if (lookalikeMatches.length > 0) {
+        actions.push('Verify suspicious domains manually by navigating to official sites directly.');
+    }
+
+    if (detections.length > 0) {
+        actions.push('Redact personal data and avoid sending sensitive identifiers in messages or forms.');
+    }
+
+    if (trackerAudit.trackersFound > 0) {
+        actions.push('Use privacy-focused browsing settings or tracker blocking extensions on risky pages.');
+    }
+
+    if (actions.length === 0) {
+        actions.push('Continue monitoring the source and re-scan if new content appears.');
+    }
+
+    return actions.slice(0, 5);
+};
+
+const buildProtectEvidenceSources = (
+    lookalikeMatches: LookalikeMatch[],
+    trackerAudit: { trackerMatches: TrackerMatch[] }
+): Array<{ title: string; url: string; snippet: string }> => {
+    const evidence: Array<{ title: string; url: string; snippet: string }> = [];
+
+    for (const match of lookalikeMatches) {
+        evidence.push({
+            title: `Suspicious domain: ${match.hostname}`,
+            url: match.url,
+            snippet: match.reason
+        });
+        if (evidence.length >= 8) {
+            return evidence;
+        }
+    }
+
+    for (const tracker of trackerAudit.trackerMatches) {
+        evidence.push({
+            title: `Tracker detected: ${tracker.trackerDomain}`,
+            url: tracker.resourceUrl,
+            snippet: `Loaded third-party resource from ${tracker.hostname}.`
+        });
+        if (evidence.length >= 8) {
+            break;
+        }
+    }
+
+    return evidence;
+};
+
+const mergeUniqueStrings = (primary: string[], secondary: string[], maxItems: number): string[] => {
+    const merged: string[] = [];
+    for (const value of [...primary, ...secondary]) {
+        const normalized = value.trim();
+        if (!normalized) {
+            continue;
+        }
+        if (!merged.some((entry) => entry.toLowerCase() === normalized.toLowerCase())) {
+            merged.push(normalized);
+        }
+        if (merged.length >= maxItems) {
+            break;
+        }
+    }
+    return merged;
+};
+
+const mergeEvidenceSources = (
+    primary: Array<{ title: string; url: string; snippet: string }>,
+    secondary: Array<{ title: string; url: string; snippet: string }>
+): Array<{ title: string; url: string; snippet: string }> => {
+    const merged: Array<{ title: string; url: string; snippet: string }> = [];
+    for (const source of [...primary, ...secondary]) {
+        const title = source.title?.trim() ?? '';
+        const url = source.url?.trim() ?? '';
+        const snippet = source.snippet?.trim() ?? '';
+        if (!title || !url || !snippet) {
+            continue;
+        }
+        if (!merged.some((entry) => entry.url === url)) {
+            merged.push({ title, url, snippet });
+        }
+        if (merged.length >= 8) {
+            break;
+        }
+    }
+    return merged;
+};
+
 export const handleProtect = async (req: Request, res: Response): Promise<void> => {
     try {
         const body = (req.body ?? {}) as ProtectRequestBody;
-        const text = readTextFromBody(body);
+        const inputType = normalizeInputType(body.inputType) ?? 'text';
+        const rawContent = readRawContent(body);
+        let text = readTextFromBody(body);
+        const hasImagePayload = inputType === 'image' && IMAGE_DATA_URL_REGEX.test(rawContent);
+
+        let modelResult: GeminiAnalysisResult | null = null;
+        let modelWarning: string | null = null;
+
+        if (hasImagePayload) {
+            try {
+                const ocrText = await extractTextFromImage(rawContent, {
+                    maxTokens: 1000,
+                    userPrompt: 'Extract all visible text from this screenshot. Return plain text only.'
+                });
+                if (ocrText.trim()) {
+                    text = normalizeWhitespace(ocrText).slice(0, 12000);
+                }
+            } catch (error) {
+                if (error instanceof OpenAIRequestError) {
+                    modelWarning = `OCR unavailable: ${error.message}`;
+                } else if (error instanceof Error) {
+                    modelWarning = `OCR unavailable: ${error.message}`;
+                }
+            }
+            // Optional model enrichment for image mode; always fallback to Gemini if OCR produced no text.
+            if (USE_GEMINI_PROTECT_MODEL || !text) {
+                try {
+                    modelResult = await analyzeInputWithGemini({
+                        mode: 'protect',
+                        inputType,
+                        content: rawContent,
+                        timeoutMs: PROTECT_MODEL_TIMEOUT_MS
+                    });
+                } catch (error) {
+                    if (error instanceof GeminiRequestError && error.status >= 500) {
+                        modelWarning = modelWarning
+                            ? `${modelWarning}; model fallback: ${error.message}`
+                            : error.message;
+                    } else {
+                        throw error;
+                    }
+                }
+                if (!text && modelResult?.extractedText) {
+                    text = normalizeWhitespace(modelResult.extractedText).slice(0, 12000);
+                }
+            }
+        }
+
         const urls = collectUrls(body, text);
         const resourceUrls = collectResourceUrls(body, text);
         const primaryUrl = resolvePrimaryUrl(body, urls.length > 0 ? urls : resourceUrls);
 
-        if (!text && urls.length === 0 && resourceUrls.length === 0) {
+        if (!text && urls.length === 0 && resourceUrls.length === 0 && !hasImagePayload) {
             throw new ProtectError(400, 'Provide text, URL, or resource list for protection checks.');
         }
 
@@ -778,13 +1124,100 @@ export const handleProtect = async (req: Request, res: Response): Promise<void> 
         const { maskedText, detections, totalCount } = detectAndMaskPii(text);
         const trackerAudit = buildTrackerAudit(primaryUrl, resourceUrls);
 
-        const phishingScore = clamp(phishingFlags.length * 15 + lookalikeMatches.length * 18, 0, 100);
+        const phishingScore = computePhishingRiskScore(phishingFlags, lookalikeMatches, urls.length);
         const piiScore = clamp(totalCount * 18, 0, 100);
         const privacyScore = clamp(trackerAudit.thirdPartyCount * 8 + trackerAudit.trackersFound * 18, 0, 100);
+        const heuristicIndexBase = clamp(
+            Math.round(phishingScore * 0.9 + piiScore * 0.07 + privacyScore * 0.03),
+            0,
+            100
+        );
+
+        let heuristicIndex = heuristicIndexBase;
+        if (hasCriticalScamPattern(phishingFlags)) {
+            heuristicIndex = Math.max(heuristicIndex, 97);
+        }
+
+        const hasModelSignal =
+            !!modelResult &&
+            (
+                modelResult.veracityIndex > 0 ||
+                modelResult.summary.trim().length > 0 ||
+                modelResult.keyFindings.length > 0 ||
+                modelResult.fakeParts.length > 0 ||
+                modelResult.evidenceSources.length > 0
+            );
+
+        let veracityIndex = heuristicIndex;
+        if (hasModelSignal && modelResult) {
+            veracityIndex = clamp(Math.round(heuristicIndex * 0.55 + modelResult.veracityIndex * 0.45), 0, 100);
+        } else if (hasImagePayload && !text) {
+            // Keep uncertain screenshots in low/medium caution until extraction succeeds.
+            veracityIndex = 28;
+        } else if (veracityIndex === 0) {
+            veracityIndex = inputType === 'url' ? 1 : 2;
+        }
+
+        const verdict = toProtectVerdict(veracityIndex);
+        const heuristicFindings = buildProtectKeyFindings(phishingFlags, lookalikeMatches, detections, trackerAudit);
+        const heuristicFakeParts = buildProtectFakeParts(phishingFlags, lookalikeMatches, detections);
+        const heuristicActions = buildProtectRecommendedActions(veracityIndex, lookalikeMatches, detections, trackerAudit);
+        const heuristicEvidenceSources = buildProtectEvidenceSources(lookalikeMatches, trackerAudit);
+        const fallbackSummary = buildProtectSummary(verdict, phishingFlags.length, totalCount, trackerAudit.trackersFound);
+
+        const keyFindings = mergeUniqueStrings(
+            heuristicFindings,
+            modelResult?.keyFindings ?? [],
+            8
+        );
+        const fakeParts = mergeUniqueStrings(
+            heuristicFakeParts,
+            modelResult?.fakeParts ?? [],
+            12
+        );
+        const recommendedActions = mergeUniqueStrings(
+            heuristicActions,
+            modelResult?.recommendedActions ?? [],
+            6
+        );
+        const evidenceSources = mergeEvidenceSources(
+            heuristicEvidenceSources,
+            modelResult?.evidenceSources ?? []
+        );
+
+        if (modelWarning) {
+            keyFindings.push(`Model fallback used due to timeout: ${modelWarning}`);
+        }
+
+        if (hasImagePayload && !text && !hasModelSignal) {
+            keyFindings.unshift('Unable to extract readable text from the uploaded image for a full scam analysis.');
+            recommendedActions.unshift('Retry with a clearer screenshot or paste the suspicious text directly.');
+            fakeParts.unshift('Unable to extract readable text from the uploaded image; suspicious phrases could not be evaluated.');
+        }
+
+        const summary =
+            hasModelSignal && modelResult?.summary && modelResult.summary.trim().length > 0
+                ? modelResult.summary.trim()
+                : hasImagePayload && !text && !hasModelSignal
+                    ? 'Image text extraction was incomplete. Returning a cautionary risk score pending clearer input.'
+                : fallbackSummary;
 
         res.status(200).json({
             status: 'success',
             data: {
+                // Backward-compatible contract consumed by current Results.tsx
+                mode: 'protect',
+                inputType,
+                veracityIndex,
+                verdict,
+                summary,
+                extractedText: maskedText || text,
+                keyFindings,
+                fakeParts,
+                recommendedActions,
+                evidenceSources,
+                model: modelResult?.model ? `${modelResult.model}+protect-heuristics-v2` : 'protect-heuristics-v2',
+                // Detailed payload retained for protect-specific UI expansion.
                 phishingRisk: {
                     score: phishingScore,
                     level: summarizeRiskLevel(phishingScore),
