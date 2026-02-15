@@ -83,7 +83,13 @@ When you edit extension files:
 
 Default backend URL is `http://localhost:8000`.
 
-To set a different backend URL from the extension service worker console:
+You can change it directly in the sidebar:
+
+1. Open sidebar
+2. In **Backend Connection**, enter new base URL
+3. Click **Save**
+
+Alternative (service worker console):
 
 ```js
 chrome.storage.local.set({ zedaBackendBaseUrl: "https://your-api.example.com" });

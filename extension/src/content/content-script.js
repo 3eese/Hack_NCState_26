@@ -4,6 +4,8 @@
   const TOGGLE_EVENT = "zeda:toggle-sidebar";
   const STATE_OPEN_CLASS = "zeda-sidebar--open";
   const DRAFT_STORAGE_KEY = "zedaSidebarDraft";
+  const BACKEND_BASE_URL_STORAGE_KEY = "zedaBackendBaseUrl";
+  const DEFAULT_BACKEND_BASE_URL = "http://localhost:8000";
   const SHADOW_STYLE_FILE = "src/content/sidebar.css";
   const RUN_SCAN_ACTION = "zeda:run-scan";
   const EDGE_TRIGGER_PX = 16;
@@ -83,6 +85,41 @@
       console.warn("[Zeda Extension] Unable to restore sidebar draft:", error);
       return null;
     }
+  };
+
+  const resolveBackendBaseUrl = async () => {
+    if (!chrome.storage?.local) {
+      return DEFAULT_BACKEND_BASE_URL;
+    }
+
+    try {
+      const payload = await chrome.storage.local.get(BACKEND_BASE_URL_STORAGE_KEY);
+      const value = payload[BACKEND_BASE_URL_STORAGE_KEY];
+      if (typeof value !== "string" || value.trim().length === 0) {
+        return DEFAULT_BACKEND_BASE_URL;
+      }
+      return value.trim().replace(/\/+$/, "");
+    } catch (error) {
+      console.warn("[Zeda Extension] Failed to read backend URL settings:", error);
+      return DEFAULT_BACKEND_BASE_URL;
+    }
+  };
+
+  const saveBackendBaseUrl = async (rawBaseUrl) => {
+    if (!chrome.storage?.local) {
+      return DEFAULT_BACKEND_BASE_URL;
+    }
+
+    const normalized = rawBaseUrl.trim().replace(/\/+$/, "");
+    if (!normalized) {
+      throw new Error("Backend URL cannot be empty.");
+    }
+
+    await chrome.storage.local.set({
+      [BACKEND_BASE_URL_STORAGE_KEY]: normalized
+    });
+
+    return normalized;
   };
 
   const loadSidebarStyles = async () => {
@@ -188,7 +225,7 @@
     const header = createElement("header", "zeda-sidebar__header");
     const titleWrap = createElement("div", "zeda-sidebar__title-wrap");
     const title = createElement("h2", "zeda-sidebar__title", "Zeda");
-    const subtitle = createElement("p", "zeda-sidebar__subtitle", "Phase 3: API Integration");
+    const subtitle = createElement("p", "zeda-sidebar__subtitle", "Cognitive Firewall • Live Page Scan");
     const closeButton = createElement("button", "zeda-sidebar__close", "Close");
     closeButton.type = "button";
     closeButton.setAttribute("aria-label", "Close Zeda sidebar");
@@ -198,6 +235,22 @@
     header.appendChild(closeButton);
 
     const body = createElement("div", "zeda-sidebar__body");
+
+    const backendSection = createElement("section", "zeda-sidebar__section");
+    const backendTitle = createElement("h3", "zeda-sidebar__section-title", "Backend Connection");
+    const backendRow = createElement("div", "zeda-sidebar__backend-row");
+    const backendInput = createElement("input", "zeda-sidebar__input");
+    const backendSaveButton = createElement("button", "zeda-sidebar__button zeda-sidebar__button--ghost", "Save");
+    const backendHint = createElement("p", "zeda-sidebar__hint", "Default: http://localhost:8000");
+    backendInput.type = "url";
+    backendInput.placeholder = "http://localhost:8000";
+    backendInput.setAttribute("aria-label", "Zeda backend base URL");
+    backendSaveButton.type = "button";
+    backendRow.appendChild(backendInput);
+    backendRow.appendChild(backendSaveButton);
+    backendSection.appendChild(backendTitle);
+    backendSection.appendChild(backendRow);
+    backendSection.appendChild(backendHint);
 
     const actionsSection = createElement("section", "zeda-sidebar__section");
     const actionsTitle = createElement("h3", "zeda-sidebar__section-title", "Quick Actions");
@@ -221,7 +274,7 @@
     const pasteSection = createElement("section", "zeda-sidebar__section");
     const pasteTitle = createElement("h3", "zeda-sidebar__section-title", "Pasted Input");
     const pasteTextArea = createElement("textarea", "zeda-sidebar__textarea");
-    pasteTextArea.placeholder = "Paste suspicious text, email content, or a URL here...";
+    pasteTextArea.placeholder = "Paste suspicious text, email content, or a URL...";
     pasteSection.appendChild(pasteTitle);
     pasteSection.appendChild(pasteTextArea);
 
@@ -245,6 +298,7 @@
     reportSection.appendChild(reportMeta);
     reportSection.appendChild(reportGrid);
 
+    body.appendChild(backendSection);
     body.appendChild(actionsSection);
     body.appendChild(pasteSection);
     body.appendChild(previewSection);
@@ -277,12 +331,20 @@
       analyzePageUrlButton.disabled = running;
       analyzePastedTextButton.disabled = running;
       pasteTextArea.disabled = running;
+      backendInput.disabled = running;
+      backendSaveButton.disabled = running;
     };
 
     const setCapturedPayload = async (payloadType, payloadValue, sourceLabel) => {
       preview.textContent = payloadValue;
       setStatus(`Captured ${payloadType} from ${sourceLabel}.`, "success");
       await saveDraft({ type: payloadType, value: payloadValue });
+    };
+
+    const applyBackendUiState = async () => {
+      const backendBaseUrl = await resolveBackendBaseUrl();
+      backendInput.value = backendBaseUrl;
+      backendHint.textContent = `Using backend: ${backendBaseUrl}`;
     };
 
     const renderReport = (pipelineData) => {
@@ -367,6 +429,23 @@
       await runScan(inferInputType(pasted), pasted, "pasted input");
     });
 
+    backendSaveButton.addEventListener("click", async () => {
+      const inputValue = backendInput.value.trim();
+      if (!inputValue) {
+        setStatus("Backend URL cannot be empty.", "warning");
+        return;
+      }
+
+      try {
+        const savedUrl = await saveBackendBaseUrl(inputValue);
+        backendInput.value = savedUrl;
+        backendHint.textContent = `Using backend: ${savedUrl}`;
+        setStatus("Backend URL saved.", "success");
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "Failed to save backend URL.", "warning");
+      }
+    });
+
     closeButton.addEventListener("click", () => {
       setOpenState(false);
     });
@@ -421,6 +500,8 @@
       }
       setStatus(`Restored previous ${draft.type || "payload"} draft from this session.`, "success");
     }
+
+    await applyBackendUiState();
 
     // Start closed; edge hover or extension command opens it.
     setOpenState(false);

@@ -1,12 +1,46 @@
 :host {
+  --zeda-bg-1: #0a111f;
+  --zeda-bg-2: #101a31;
+  --zeda-surface: rgba(13, 23, 43, 0.86);
+  --zeda-surface-2: rgba(17, 30, 56, 0.88);
+  --zeda-border: rgba(148, 163, 184, 0.2);
+  --zeda-border-strong: rgba(125, 211, 252, 0.42);
+  --zeda-text: #e6edf7;
+  --zeda-muted: #9ab0cf;
+  --zeda-accent: #22d3ee;
+  --zeda-accent-2: #34d399;
+  --zeda-warning: #f59e0b;
+  --zeda-danger: #fb7185;
+  --zeda-shadow: 0 24px 56px rgba(2, 10, 25, 0.45);
+
   position: fixed;
   top: 0;
   right: 0;
   height: 100vh;
-  width: 380px;
-  max-width: min(92vw, 440px);
+  width: 396px;
+  max-width: min(94vw, 448px);
   z-index: 2147483646;
   pointer-events: none;
+}
+
+:host::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  height: 130px;
+  width: 5px;
+  border-radius: 999px 0 0 999px;
+  background: linear-gradient(180deg, var(--zeda-accent), var(--zeda-accent-2));
+  box-shadow: 0 0 18px rgba(34, 211, 238, 0.5);
+  opacity: 0.82;
+  transition: opacity 180ms ease;
+  pointer-events: none;
+}
+
+:host(.zeda-sidebar--open)::before {
+  opacity: 0;
 }
 
 :host(.zeda-sidebar--open) .zeda-sidebar__panel {
@@ -20,13 +54,17 @@
   display: flex;
   flex-direction: column;
   pointer-events: auto;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: #0f172a;
-  color: #e2e8f0;
-  border-left: 1px solid #334155;
-  box-shadow: -14px 0 30px rgba(2, 6, 23, 0.42);
+  font-family: "Avenir Next", "Segoe UI Variable", "Trebuchet MS", "Helvetica Neue", sans-serif;
+  color: var(--zeda-text);
+  background:
+    radial-gradient(circle at 18% 12%, rgba(34, 211, 238, 0.18), transparent 38%),
+    radial-gradient(circle at 82% 96%, rgba(52, 211, 153, 0.12), transparent 44%),
+    linear-gradient(165deg, var(--zeda-bg-1), var(--zeda-bg-2));
+  border-left: 1px solid var(--zeda-border);
+  box-shadow: var(--zeda-shadow);
   transform: translateX(100%);
-  transition: transform 220ms ease;
+  transition: transform 240ms cubic-bezier(0.3, 0.8, 0.2, 1);
+  backdrop-filter: blur(4px);
 }
 
 .zeda-sidebar__header {
@@ -34,65 +72,100 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 16px;
-  border-bottom: 1px solid #334155;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--zeda-border);
+  background: linear-gradient(180deg, rgba(11, 20, 38, 0.95), rgba(11, 20, 38, 0.62));
 }
 
 .zeda-sidebar__title-wrap {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .zeda-sidebar__title {
   margin: 0;
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
+  font-size: 20px;
+  font-weight: 780;
+  letter-spacing: 0.18px;
 }
 
 .zeda-sidebar__subtitle {
   margin: 0;
-  color: #94a3b8;
+  color: var(--zeda-muted);
   font-size: 12px;
 }
 
 .zeda-sidebar__close {
-  border: 1px solid #475569;
-  background: #1e293b;
-  color: #e2e8f0;
-  border-radius: 8px;
+  border: 1px solid var(--zeda-border);
+  background: rgba(20, 34, 62, 0.84);
+  color: var(--zeda-text);
+  border-radius: 10px;
   font-size: 13px;
-  font-weight: 600;
-  padding: 6px 10px;
+  font-weight: 650;
+  padding: 6px 12px;
   cursor: pointer;
 }
 
 .zeda-sidebar__close:hover {
-  background: #334155;
+  border-color: var(--zeda-border-strong);
+  background: rgba(18, 37, 71, 0.96);
 }
 
 .zeda-sidebar__body {
   flex: 1;
   overflow: auto;
   padding: 16px;
-  line-height: 1.45;
-  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .zeda-sidebar__section {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-bottom: 16px;
+  border: 1px solid var(--zeda-border);
+  border-radius: 14px;
+  background: linear-gradient(175deg, var(--zeda-surface), var(--zeda-surface-2));
+  padding: 12px;
 }
 
 .zeda-sidebar__section-title {
   margin: 0;
-  font-size: 12px;
-  letter-spacing: 0.5px;
+  font-size: 11px;
+  letter-spacing: 0.7px;
   text-transform: uppercase;
-  color: #94a3b8;
+  color: var(--zeda-muted);
+}
+
+.zeda-sidebar__backend-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.zeda-sidebar__input {
+  width: 100%;
+  border: 1px solid var(--zeda-border);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: rgba(5, 14, 30, 0.9);
+  color: var(--zeda-text);
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.zeda-sidebar__input:focus {
+  outline: 2px solid rgba(34, 211, 238, 0.45);
+  outline-offset: 1px;
+}
+
+.zeda-sidebar__hint {
+  margin: 0;
+  color: var(--zeda-muted);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .zeda-sidebar__actions {
@@ -102,48 +175,57 @@
 }
 
 .zeda-sidebar__button {
-  border: 1px solid #475569;
-  background: #1e293b;
-  color: #e2e8f0;
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  background: linear-gradient(165deg, rgba(34, 211, 238, 0.18), rgba(16, 185, 129, 0.15));
+  color: #ecfeff;
   border-radius: 10px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 680;
   padding: 9px 10px;
   text-align: center;
   cursor: pointer;
 }
 
 .zeda-sidebar__button:hover {
-  background: #334155;
+  border-color: rgba(34, 211, 238, 0.65);
+  transform: translateY(-1px);
 }
 
 .zeda-sidebar__button:disabled {
-  opacity: 0.58;
+  opacity: 0.55;
   cursor: not-allowed;
-  background: #111827;
+  transform: none;
 }
 
 .zeda-sidebar__button--full {
   grid-column: 1 / -1;
 }
 
+.zeda-sidebar__button--ghost {
+  background: rgba(15, 31, 59, 0.85);
+  border-color: var(--zeda-border);
+  color: var(--zeda-text);
+  min-width: 70px;
+}
+
 .zeda-sidebar__textarea {
   min-height: 118px;
   resize: vertical;
-  border: 1px solid #475569;
+  border: 1px solid var(--zeda-border);
   border-radius: 10px;
   padding: 10px;
-  background: #0b1224;
-  color: #e2e8f0;
+  background: rgba(5, 14, 30, 0.9);
+  color: var(--zeda-text);
   font: inherit;
 }
 
 .zeda-sidebar__textarea:focus {
-  outline: 2px solid #38bdf8;
+  outline: 2px solid rgba(34, 211, 238, 0.45);
   outline-offset: 1px;
 }
 
-.zeda-sidebar__textarea:disabled {
+.zeda-sidebar__textarea:disabled,
+.zeda-sidebar__input:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
@@ -151,46 +233,46 @@
 .zeda-sidebar__preview {
   margin: 0;
   min-height: 66px;
-  max-height: 170px;
+  max-height: 190px;
   overflow: auto;
-  border: 1px solid #334155;
+  border: 1px solid var(--zeda-border);
   border-radius: 10px;
-  background: #0b1224;
-  color: #cbd5e1;
+  background: rgba(5, 14, 30, 0.9);
+  color: #cfe1fb;
   padding: 10px;
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   line-height: 1.4;
 }
 
 .zeda-sidebar__status {
   margin: 0;
-  border-radius: 8px;
-  border: 1px solid #334155;
-  background: #111827;
-  color: #cbd5e1;
+  border-radius: 9px;
+  border: 1px solid var(--zeda-border);
+  background: rgba(15, 23, 42, 0.75);
+  color: #d5e4fb;
   padding: 8px 10px;
   font-size: 12px;
   line-height: 1.4;
 }
 
 .zeda-sidebar__status--warning {
-  border-color: #b45309;
-  background: #1f1300;
-  color: #fcd34d;
+  border-color: rgba(245, 158, 11, 0.62);
+  background: rgba(54, 33, 0, 0.62);
+  color: #fde68a;
 }
 
 .zeda-sidebar__status--success {
-  border-color: #0f766e;
-  background: #042f2e;
-  color: #99f6e4;
+  border-color: rgba(52, 211, 153, 0.52);
+  background: rgba(6, 46, 37, 0.65);
+  color: #a7f3d0;
 }
 
 .zeda-sidebar__report-meta {
   margin: 0;
-  color: #cbd5e1;
+  color: #d3e0f6;
   font-size: 12px;
   line-height: 1.35;
 }
@@ -201,9 +283,9 @@
 }
 
 .zeda-sidebar__result-card {
-  border: 1px solid #334155;
-  border-radius: 10px;
-  background: #111827;
+  border: 1px solid var(--zeda-border);
+  border-radius: 12px;
+  background: rgba(8, 16, 34, 0.85);
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -220,28 +302,28 @@
 .zeda-sidebar__result-title {
   margin: 0;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 720;
 }
 
 .zeda-sidebar__result-badge {
   border-radius: 999px;
-  border: 1px solid #0f766e;
-  background: #042f2e;
-  color: #99f6e4;
+  border: 1px solid rgba(52, 211, 153, 0.52);
+  background: rgba(6, 46, 37, 0.66);
+  color: #a7f3d0;
   font-size: 11px;
   padding: 2px 8px;
   white-space: nowrap;
 }
 
 .zeda-sidebar__result-badge--error {
-  border-color: #b45309;
-  background: #1f1300;
-  color: #fcd34d;
+  border-color: rgba(251, 113, 133, 0.58);
+  background: rgba(63, 16, 26, 0.72);
+  color: #fecdd3;
 }
 
 .zeda-sidebar__result-summary {
   margin: 0;
-  color: #cbd5e1;
+  color: #d3e0f6;
   font-size: 12px;
   line-height: 1.4;
 }
@@ -249,24 +331,26 @@
 .zeda-sidebar__list {
   margin: 0;
   padding-left: 16px;
-  color: #cbd5e1;
+  color: #cddcf4;
   font-size: 12px;
   line-height: 1.35;
 }
 
 .zeda-sidebar__list-item + .zeda-sidebar__list-item {
-  margin-top: 3px;
+  margin-top: 4px;
 }
 
 .zeda-sidebar__result-meta {
   margin: 0;
-  color: #94a3b8;
+  color: var(--zeda-muted);
   font-size: 11px;
 }
 
 .zeda-sidebar__footer {
   padding: 12px 16px;
-  border-top: 1px solid #334155;
-  color: #94a3b8;
-  font-size: 12px;
+  border-top: 1px solid var(--zeda-border);
+  color: var(--zeda-muted);
+  font-size: 11px;
+  letter-spacing: 0.35px;
+  background: rgba(11, 20, 38, 0.72);
 }
