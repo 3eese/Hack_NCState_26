@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Zeda Sidebar",
+  "version": "0.1.0",
+  "description": "Injects a Zeda sliding sidebar into the active page.",
+  "permissions": ["activeTab", "scripting", "storage", "tabs"],
+  "host_permissions": ["http://localhost:8000/*"],
+  "background": {
+    "service_worker": "src/background/service-worker.js"
+  },
+  "action": {
+    "default_title": "Toggle Zeda Sidebar"
+  },
+  "commands": {
+    "toggle-zeda-sidebar": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Z",
+        "mac": "Command+Shift+Z"
+      },
+      "description": "Toggle Zeda sidebar on the current tab"
+    }
+  }
+}
