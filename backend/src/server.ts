@@ -1,4 +1,4 @@
-import express, { Application } from 'express';
+import express, { Application, NextFunction, Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
@@ -10,21 +10,20 @@ import { handleProtect } from './controllers/protect';
 dotenv.config();
 
 const app: Application = express();
-const PORT = Number(process.env.PORT) || 8000;
-const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT ?? '2mb';
-const URLENCODED_BODY_LIMIT = process.env.URLENCODED_BODY_LIMIT ?? '2mb';
+const PORT = process.env.PORT || 8000;
+const DEFAULT_JSON_BODY_LIMIT = '20mb';
+const JSON_BODY_LIMIT =
+    (process.env.JSON_BODY_LIMIT || process.env.BODY_LIMIT || DEFAULT_JSON_BODY_LIMIT).trim();
 
-const OPTIONAL_ENV_VARS = ['OPENAI_API_KEY', 'SEARCH_API_KEY', 'SEARCH_ENGINE_ID'];
-for (const key of OPTIONAL_ENV_VARS) {
-    if (!process.env[key]) {
-        console.warn(`[Config] Missing ${key} (feature may be limited).`);
-    }
-}
+type BodyParserError = Error & {
+    status?: number;
+    type?: string;
+};
 
 // Middleware
 app.use(cors()); // Crucial for allowing Next.js to talk to this API
-app.use(express.json({ limit: JSON_BODY_LIMIT })); // Parses incoming JSON payloads
-app.use(express.urlencoded({ extended: true, limit: URLENCODED_BODY_LIMIT }));
+app.use(express.json({ limit: JSON_BODY_LIMIT })); // Accept larger payloads for base64 image submissions.
+app.use(express.urlencoded({ extended: true, limit: JSON_BODY_LIMIT }));
 
 // Define Routes mapping to your System Design
 app.get('/health', (_req, res) => {
@@ -38,12 +37,21 @@ app.post('/api/ingest', handleIngest);
 app.post('/api/verify', handleVerify);
 app.post('/api/protect', handleProtect);
 
-app.use((_req, res) => {
-    res.status(404).json({ status: 'error', message: 'Route not found' });
+app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
+    const parserError = error as BodyParserError;
+    if (parserError?.status === 413 || parserError?.type === 'entity.too.large') {
+        res.status(413).json({
+            status: 'error',
+            message: `Payload too large. Reduce upload size or increase JSON_BODY_LIMIT (current: ${JSON_BODY_LIMIT}).`
+        });
+        return;
+    }
+
+    next(error);
 });
 
-app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-    console.error('[Unhandled Error]:', err);
+app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    console.error('[Server Error]:', error);
     res.status(500).json({ status: 'error', message: 'Internal Server Error' });
 });
 

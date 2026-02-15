@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Chip } from "@/components/Chip";
-import { Upload, Link, Type, Zap, ArrowLeft, Image } from "lucide-react";
+import { Upload, Link, Type, ArrowLeft, Image } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type InputType = "image" | "url" | "text";
@@ -65,7 +65,7 @@ const Submit = () => {
             <ArrowLeft className="w-4 h-4" />
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-primary/20 flex items-center justify-center">
-                <Zap className="w-3.5 h-3.5 text-primary" />
+                <img src="/zeda-logo.svg" alt="Zeda" className="w-3.5 h-3.5" />
               </div>
               <span className="text-base font-bold text-foreground">Zeda</span>
             </div>
