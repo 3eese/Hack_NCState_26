@@ -4,7 +4,7 @@ import { EvidenceCard } from "@/components/EvidenceCard";
 import { ReasonBullet } from "@/components/ReasonBullet";
 import { Chip } from "@/components/Chip";
 import { AnalysisProgress } from "@/components/AnalysisProgress";
-import { ArrowLeft, Zap, Copy, RotateCcw } from "lucide-react";
+import { ArrowLeft, Copy, RotateCcw } from "lucide-react";
 import { useState, useEffect } from "react";
 
 type Mode = "verify" | "protect";
@@ -127,7 +127,7 @@ const Results = () => {
         <nav className="border-b border-border px-6 py-4">
           <div className="max-w-4xl mx-auto flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-primary/20 flex items-center justify-center">
-              <Zap className="w-3.5 h-3.5 text-primary" />
+              <img src="/zeda-logo.svg" alt="Zeda" className="w-3.5 h-3.5" />
             </div>
             <span className="text-base font-bold text-foreground">Zeda</span>
           </div>
@@ -151,7 +151,7 @@ const Results = () => {
               <ArrowLeft className="w-4 h-4" />
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-lg bg-primary/20 flex items-center justify-center">
-                  <Zap className="w-3.5 h-3.5 text-primary" />
+                  <img src="/zeda-logo.svg" alt="Zeda" className="w-3.5 h-3.5" />
                 </div>
                 <span className="text-base font-bold text-foreground">Zeda</span>
               </div>
@@ -184,7 +184,7 @@ const Results = () => {
             <ArrowLeft className="w-4 h-4" />
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-primary/20 flex items-center justify-center">
-                <Zap className="w-3.5 h-3.5 text-primary" />
+                <img src="/zeda-logo.svg" alt="Zeda" className="w-3.5 h-3.5" />
               </div>
               <span className="text-base font-bold text-foreground">Zeda</span>
             </div>
