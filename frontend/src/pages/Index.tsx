@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ModeCard } from "@/components/ModeCard";
+import { Shield } from "lucide-react";
 import noirHero from "@/assets/noir-hero.jpg";
 
 const Index = () => {
@@ -14,56 +15,73 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col relative">
-      {/* Hero background */}
+    <div className="relative min-h-screen overflow-hidden bg-noir-base">
       <div className="absolute inset-0 z-0">
         <img src={noirHero} alt="" className="w-full h-full object-cover" />
+        <div className="absolute inset-0 bg-noir-base/30" />
         <div className="absolute inset-0 noir-overlay" />
-        <div className="absolute inset-0 noir-vignette" />
+        <div className="absolute inset-0 vignette-overlay" />
       </div>
+      <div className="noise-overlay" aria-hidden="true" />
 
-      {/* Nav */}
-      <nav className="relative z-10 border-b border-border/50 px-6 py-4 backdrop-blur-sm bg-background/30">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
-              <img src="/zeda-logo.svg" alt="Zeda" className="w-4 h-4" />
+      <nav className="relative z-10 glass-dark">
+        <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-4">
+          <div className="group flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-sharp bg-brass text-noir-base transition-all duration-300 group-hover:shadow-glow">
+              <Shield className="h-5 w-5" />
             </div>
-            <span className="text-lg font-bold text-foreground tracking-tight font-display">Zeda</span>
+            <span className="font-display text-2xl font-semibold tracking-tight text-foreground">Zeda</span>
           </div>
-          <span className="text-xs text-muted-foreground hidden sm:block font-light tracking-widest uppercase">
-            Verify · Protect
+          <span className="hidden text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground sm:block">
+            Cognitive Firewall
           </span>
         </div>
       </nav>
 
-      {/* Hero */}
-      <main className="relative z-10 flex-1 flex items-center justify-center px-6 py-12">
-        <div className="max-w-xl w-full">
-          <div className="text-center mb-10">
-            <h1 className="text-4xl sm:text-5xl font-bold font-display text-foreground tracking-tight mb-3">
-              Trust, <span className="text-gradient-primary italic">verified.</span>
-            </h1>
-            <p className="text-muted-foreground text-base max-w-md mx-auto leading-relaxed">
-              Check misinformation and protect your identity from scams — using screenshots, URLs, or text.
+      <main className="relative z-10 flex min-h-[calc(100vh-72px)] items-center px-6 py-16">
+        <div className="mx-auto w-full max-w-7xl">
+          <h1 className="max-w-4xl animate-fade-in-up font-display text-5xl font-semibold leading-[0.95] tracking-tight text-foreground sm:text-7xl">
+            Read the signal.
+            <br />
+            <span className="text-brass">Before you trust</span> the noise.
+          </h1>
+
+          <p
+            className="mt-6 max-w-2xl animate-fade-in-up text-lg leading-relaxed text-muted-foreground sm:text-xl"
+            style={{ animationDelay: "120ms" }}
+          >
+            AI-powered verification and identity defense for screenshots, URLs, and raw text.
+            Separate truth from manipulation before it spreads.
+          </p>
+
+          <div
+            className="mt-12 grid max-w-5xl gap-6 md:grid-cols-2 lg:gap-8"
+            style={{ animationDelay: "200ms" }}
+          >
+            <div className="animate-fade-in-up">
+              <ModeCard mode="verify" selected={selectedMode === "verify"} onClick={() => setSelectedMode("verify")} />
+            </div>
+            <div className="animate-fade-in-up" style={{ animationDelay: "80ms" }}>
+              <ModeCard mode="protect" selected={selectedMode === "protect"} onClick={() => setSelectedMode("protect")} />
+            </div>
+          </div>
+
+          <div className="mt-8 flex max-w-2xl flex-col gap-4">
+            <button
+              onClick={handleContinue}
+              disabled={!selectedMode}
+              className="rounded-sharp bg-brass px-6 py-4 text-sm font-semibold uppercase tracking-[0.18em] text-noir-base transition-all duration-300 hover:bg-brass-accent hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Begin Investigation
+            </button>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Zeda provides probabilistic signals based on public evidence and heuristic analysis.
+              It does not guarantee authenticity or full fraud prevention.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
-            <ModeCard mode="verify" selected={selectedMode === "verify"} onClick={() => setSelectedMode("verify")} />
-            <ModeCard mode="protect" selected={selectedMode === "protect"} onClick={() => setSelectedMode("protect")} />
-          </div>
-
-          <button
-            onClick={handleContinue}
-            disabled={!selectedMode}
-            className="w-full py-3.5 rounded-xl font-semibold text-sm transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed bg-primary text-primary-foreground hover:glow-primary-strong active:scale-[0.98]"
-          >
-            Continue
-          </button>
-
-          <p className="text-center text-[11px] text-muted-foreground mt-6 max-w-sm mx-auto leading-relaxed">
-            Zeda provides probabilistic signals based on public evidence and heuristics. It cannot guarantee authenticity or prevent all fraud.
+          <p className="mt-10 max-w-2xl text-editorial text-lg text-muted-foreground">
+            We love projects that make you pause and think, “Why didn&apos;t I think of that?”
           </p>
         </div>
       </main>

@@ -4,8 +4,10 @@ import { EvidenceCard } from "@/components/EvidenceCard";
 import { ReasonBullet } from "@/components/ReasonBullet";
 import { Chip } from "@/components/Chip";
 import { AnalysisProgress } from "@/components/AnalysisProgress";
-import { ArrowLeft, Copy, RotateCcw } from "lucide-react";
+import { ArrowLeft, Copy, Eye, Lock, RotateCcw, Search } from "lucide-react";
 import { useState, useEffect } from "react";
+import { cn } from "@/lib/utils";
+import noirHero from "@/assets/noir-hero.jpg";
 
 type Mode = "verify" | "protect";
 type InputType = "text" | "url" | "image";
@@ -449,18 +451,26 @@ const Results = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex flex-col">
-        <nav className="border-b border-border px-6 py-4">
-          <div className="max-w-4xl mx-auto flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-primary/20 flex items-center justify-center">
-              <img src="/zeda-logo.svg" alt="Zeda" className="w-3.5 h-3.5" />
+      <div className="relative min-h-screen overflow-x-hidden bg-noir-base">
+        <div className="absolute inset-0 z-0">
+          <img src={noirHero} alt="" className="h-full w-full object-cover" />
+          <div className="absolute inset-0 bg-noir-base/40" />
+          <div className="absolute inset-0 noir-overlay" />
+          <div className="absolute inset-0 vignette-overlay" />
+          <div className="absolute inset-0 bg-gradient-to-br from-noir-surface/55 via-transparent to-transparent" />
+        </div>
+        <div className="noise-overlay" aria-hidden="true" />
+        <nav className="relative z-10 glass-dark">
+          <div className="mx-auto flex max-w-7xl items-center gap-2 px-6 py-4">
+            <div className="flex h-8 w-8 items-center justify-center rounded-sharp bg-brass text-noir-base">
+              {mode === "verify" ? <Eye className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
             </div>
-            <span className="text-base font-bold text-foreground">Zeda</span>
+            <span className="font-display text-xl text-foreground">Zeda</span>
           </div>
         </nav>
-        <main className="flex-1 flex items-center justify-center px-6">
-          <div className="max-w-xs w-full">
-            <h2 className="text-xl font-bold font-display text-foreground mb-6">Analyzing...</h2>
+        <main className="relative z-10 flex min-h-[calc(100vh-72px)] items-center justify-center px-6">
+          <div className="w-full max-w-sm rounded-sharp border border-white/10 bg-noir-card p-7">
+            <h2 className="mb-6 font-display text-2xl text-foreground">Analyzing...</h2>
             <AnalysisProgress steps={analysisSteps} />
           </div>
         </main>
@@ -470,24 +480,27 @@ const Results = () => {
 
   if (error || !result) {
     return (
-      <div className="min-h-screen flex flex-col">
-        <nav className="border-b border-border px-6 py-4">
-          <div className="max-w-4xl mx-auto flex items-center justify-between">
-            <button onClick={() => navigate("/")} className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
-              <ArrowLeft className="w-4 h-4" />
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-primary/20 flex items-center justify-center">
-                  <img src="/zeda-logo.svg" alt="Zeda" className="w-3.5 h-3.5" />
-                </div>
-                <span className="text-base font-bold text-foreground">Zeda</span>
-              </div>
+      <div className="relative min-h-screen overflow-x-hidden bg-noir-base">
+        <div className="absolute inset-0 z-0">
+          <img src={noirHero} alt="" className="h-full w-full object-cover" />
+          <div className="absolute inset-0 bg-noir-base/40" />
+          <div className="absolute inset-0 noir-overlay" />
+          <div className="absolute inset-0 vignette-overlay" />
+          <div className="absolute inset-0 bg-gradient-to-br from-noir-surface/55 via-transparent to-transparent" />
+        </div>
+        <div className="noise-overlay" aria-hidden="true" />
+        <nav className="relative z-10 glass-dark">
+          <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+            <button onClick={() => navigate("/")} className="flex items-center gap-2 text-muted-foreground transition-colors hover:text-foreground">
+              <ArrowLeft className="h-4 w-4" />
+              <span className="font-display text-xl text-foreground">Zeda</span>
             </button>
           </div>
         </nav>
-        <main className="flex-1 px-6 py-8 max-w-2xl mx-auto w-full">
-          <div className="rounded-xl border border-destructive/40 bg-card p-5">
-            <h3 className="text-sm font-bold text-destructive uppercase tracking-wider mb-2">Analysis Error</h3>
-            <p className="text-sm text-foreground/90">{error || "No analysis result available."}</p>
+        <main className="relative z-10 mx-auto w-full max-w-3xl px-6 py-12">
+          <div className="rounded-sharp border border-destructive/40 bg-noir-card p-6">
+            <h3 className="mb-2 text-sm font-bold uppercase tracking-[0.16em] text-destructive">Analysis Error</h3>
+            <p className="text-sm leading-relaxed text-foreground/90">{error || "No analysis result available."}</p>
           </div>
         </main>
       </div>
@@ -503,120 +516,151 @@ const Results = () => {
   })) as Array<{ text: string; tag: "Consistency" | "Scam"; positive: boolean }>;
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <nav className="border-b border-border px-6 py-4">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <button onClick={() => navigate("/")} className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
-            <ArrowLeft className="w-4 h-4" />
+    <div className="relative min-h-screen overflow-x-hidden bg-noir-base">
+      <div className="absolute inset-0 z-0">
+        <img src={noirHero} alt="" className="h-full w-full object-cover" />
+        <div className="absolute inset-0 bg-noir-base/40" />
+        <div className="absolute inset-0 noir-overlay" />
+        <div className="absolute inset-0 vignette-overlay" />
+        <div className="absolute inset-0 bg-gradient-to-br from-noir-surface/55 via-transparent to-transparent" />
+      </div>
+      <div className="noise-overlay" aria-hidden="true" />
+
+      <nav className="relative z-10 glass-dark">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+          <button onClick={() => navigate("/")} className="flex items-center gap-2 text-muted-foreground transition-colors hover:text-foreground">
+            <ArrowLeft className="h-4 w-4" />
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-primary/20 flex items-center justify-center">
-                <img src="/zeda-logo.svg" alt="Zeda" className="w-3.5 h-3.5" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-sharp bg-brass text-noir-base">
+                {mode === "verify" ? <Eye className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
               </div>
-              <span className="text-base font-bold text-foreground">Zeda</span>
+              <span className="font-display text-xl text-foreground">Zeda</span>
             </div>
           </button>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 text-muted-foreground">
             <Chip variant={mode === "verify" ? "success" : "warning"}>{mode === "verify" ? "Verify" : "Protect"}</Chip>
           </div>
         </div>
       </nav>
 
-      <main className="flex-1 px-6 py-8 max-w-2xl mx-auto w-full">
-        <div className="flex flex-col items-center mb-8 animate-fade-up">
-          <Chip
-            variant={score >= 75 && mode === "verify" ? "success" : score < 40 && mode === "verify" ? "danger" : mode === "protect" && score >= 65 ? "danger" : "warning"}
-            className="mb-4"
-          >
-            {verdict}
-          </Chip>
-          <ScoreGauge score={score} label="Veracity Index" />
+      <main className="relative z-10 mx-auto w-full max-w-6xl px-6 py-10">
+        <div className="mb-10 animate-fade-in-up">
+          <div className={cn("mb-3 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em]", mode === "verify" ? "text-brass" : "text-emerald-safe")}>
+            {mode === "verify" ? <Eye className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+            {mode === "verify" ? "Verification Results" : "Protection Scan Results"}
+          </div>
+          <h1 className="font-display text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">Analysis Complete</h1>
         </div>
 
-        <section className="mb-8 animate-fade-up" style={{ animationDelay: "0.1s" }}>
-          <h3 className="text-sm font-bold text-foreground uppercase tracking-wider mb-3">Summary</h3>
-          <div className="rounded-xl border border-border bg-card p-4">
-            <p className="text-sm text-foreground/90 leading-relaxed">
-              {result.summary || "No summary returned by the model."}
-            </p>
-          </div>
-        </section>
-
-        <section className="mb-8 animate-fade-up" style={{ animationDelay: "0.14s" }}>
-          <h3 className="text-sm font-bold text-foreground uppercase tracking-wider mb-3">Key Findings</h3>
-          <div className="rounded-xl border border-border bg-card p-4 divide-y divide-border">
-            {(result.keyFindings.length > 0 ? result.keyFindings : ["No key findings returned."]).map((finding, i) => (
-              <ReasonBullet key={i} text={finding} tag="Source" positive={mode === "verify"} />
-            ))}
-          </div>
-        </section>
-
-        <section className="mb-8 animate-fade-up" style={{ animationDelay: "0.18s" }}>
-          <h3 className="text-sm font-bold text-foreground uppercase tracking-wider mb-3">Potentially Fake Parts</h3>
-          <div className="rounded-xl border border-border bg-card p-4 divide-y divide-border">
-            {(fakePartReasons.length > 0 ? fakePartReasons : [{ text: "No suspicious sections were explicitly flagged.", tag: "Consistency" as const, positive: true }]).map((part, i) => (
-              <ReasonBullet key={i} text={part.text} tag={part.tag} positive={part.positive} />
-            ))}
-          </div>
-        </section>
-
-        <section className="mb-8 animate-fade-up" style={{ animationDelay: "0.22s" }}>
-          <h3 className="text-sm font-bold text-foreground uppercase tracking-wider mb-3">Evidence Sources</h3>
-          <div className="space-y-3">
-            {result.evidenceSources.length > 0 ? (
-              result.evidenceSources.map((e, i) => (
-                <EvidenceCard key={i} title={e.title} domain={getDomainFromUrl(e.url)} snippet={e.snippet} url={e.url} />
-              ))
-            ) : (
-              <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
-                No evidence links were returned for this input.
+        <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
+          <div className="space-y-8">
+            <section className="animate-fade-in-up rounded-sharp border border-white/10 bg-noir-card p-7" style={{ animationDelay: "60ms" }}>
+              <div className="flex flex-col items-center gap-7 md:flex-row">
+                <ScoreGauge score={score} label="Veracity Index" />
+                <div className="text-center md:text-left">
+                  <Chip
+                    variant={score >= 75 && mode === "verify" ? "success" : score < 40 && mode === "verify" ? "danger" : mode === "protect" && score >= 65 ? "danger" : "warning"}
+                    className="mb-3"
+                  >
+                    {verdict}
+                  </Chip>
+                  <p className="max-w-xl text-base leading-relaxed text-foreground/90">
+                    {result.summary || "No summary returned by the model."}
+                  </p>
+                </div>
               </div>
-            )}
-          </div>
-        </section>
+            </section>
 
-        <section className="mb-8 animate-fade-up" style={{ animationDelay: "0.25s" }}>
-          <h3 className="text-sm font-bold text-foreground uppercase tracking-wider mb-3">Recommended Next Steps</h3>
-          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-            {(result.recommendedActions.length > 0 ? result.recommendedActions : ["Re-check with additional trusted sources before acting."]).map((nextStep, i) => (
-              <div key={i} className="flex items-start gap-3">
-                <span className="w-5 h-5 rounded-full bg-primary/15 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
-                  {i + 1}
-                </span>
-                <p className="text-sm text-foreground/90 leading-relaxed">{nextStep}</p>
+            <section className="animate-fade-in-up" style={{ animationDelay: "100ms" }}>
+              <h3 className="mb-3 text-sm font-bold uppercase tracking-[0.16em] text-foreground">Key Findings</h3>
+              <div className="rounded-sharp border border-white/10 bg-noir-card p-4 divide-y divide-border">
+                {(result.keyFindings.length > 0 ? result.keyFindings : ["No key findings returned."]).map((finding, i) => (
+                  <ReasonBullet key={i} text={finding} tag="Source" positive={mode === "verify"} />
+                ))}
               </div>
-            ))}
-          </div>
-        </section>
+            </section>
 
-        <div className="flex gap-3 animate-fade-up" style={{ animationDelay: "0.3s" }}>
-          <button
-            onClick={() => navigate("/")}
-            className="flex-1 py-3 rounded-xl font-semibold text-sm border border-border bg-card text-foreground hover:bg-accent transition-all flex items-center justify-center gap-2"
-          >
-            <RotateCcw className="w-4 h-4" />
-            New Check
-          </button>
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText(
-                [
-                  `Zeda ${mode === "verify" ? "Verification" : "Protection"} Report`,
-                  `Verdict: ${verdict}`,
-                  `Veracity Index: ${score}/100`,
-                  "",
-                  "Potentially Fake Parts:",
-                  ...(result.fakeParts.length ? result.fakeParts.map((part) => `- ${part}`) : ["- None identified"]),
-                  "",
-                  "Evidence Sources:",
-                  ...(result.evidenceSources.length ? result.evidenceSources.map((source) => `- ${source.title}: ${source.url}`) : ["- None"]),
-                ].join("\n"),
-              );
-            }}
-            className="flex-1 py-3 rounded-xl font-semibold text-sm bg-primary text-primary-foreground hover:glow-primary-strong transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
-          >
-            <Copy className="w-4 h-4" />
-            Copy Receipt
-          </button>
+            <section className="animate-fade-in-up" style={{ animationDelay: "140ms" }}>
+              <h3 className="mb-3 text-sm font-bold uppercase tracking-[0.16em] text-foreground">Potentially Suspicious Segments</h3>
+              <div className="rounded-sharp border border-white/10 bg-noir-card p-4 divide-y divide-border">
+                {(fakePartReasons.length > 0
+                  ? fakePartReasons
+                  : [{ text: "No suspicious sections were explicitly flagged.", tag: "Consistency" as const, positive: true }]
+                ).map((part, i) => (
+                  <ReasonBullet key={i} text={part.text} tag={part.tag} positive={part.positive} />
+                ))}
+              </div>
+            </section>
+
+            <section className="animate-fade-in-up" style={{ animationDelay: "180ms" }}>
+              <h3 className="mb-3 text-sm font-bold uppercase tracking-[0.16em] text-foreground">Evidence Sources</h3>
+              <div className="space-y-3">
+                {result.evidenceSources.length > 0 ? (
+                  result.evidenceSources.map((e, i) => (
+                    <EvidenceCard key={i} title={e.title} domain={getDomainFromUrl(e.url)} snippet={e.snippet} url={e.url} />
+                  ))
+                ) : (
+                  <div className="rounded-sharp border border-white/10 bg-noir-card p-4 text-sm text-muted-foreground">
+                    No evidence links were returned for this input.
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
+
+          <aside className="animate-slide-in-right space-y-5 lg:sticky lg:top-24 lg:h-fit" style={{ animationDelay: "220ms" }}>
+            <section className="rounded-sharp border border-white/10 bg-noir-card p-5">
+              <h3 className="mb-4 font-display text-2xl text-foreground">Recommended Actions</h3>
+              <div className="space-y-3">
+                {(result.recommendedActions.length > 0 ? result.recommendedActions : ["Re-check with additional trusted sources before acting."]).map((nextStep, i) => (
+                  <div key={i} className="flex items-start gap-3">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-bold text-primary">
+                      {i + 1}
+                    </span>
+                    <p className="text-sm leading-relaxed text-foreground/90">{nextStep}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <button
+              onClick={() => navigate("/")}
+              className="flex w-full items-center justify-center gap-2 rounded-sharp border border-white/15 bg-noir-card px-5 py-4 text-sm font-semibold uppercase tracking-[0.14em] text-foreground transition-all duration-300 hover:border-brass/55 hover:text-brass"
+            >
+              <RotateCcw className="h-4 w-4" />
+              New Check
+            </button>
+
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(
+                  [
+                    `Zeda ${mode === "verify" ? "Verification" : "Protection"} Report`,
+                    `Verdict: ${verdict}`,
+                    `Veracity Index: ${score}/100`,
+                    "",
+                    "Potentially Fake Parts:",
+                    ...(result.fakeParts.length ? result.fakeParts.map((part) => `- ${part}`) : ["- None identified"]),
+                    "",
+                    "Evidence Sources:",
+                    ...(result.evidenceSources.length ? result.evidenceSources.map((source) => `- ${source.title}: ${source.url}`) : ["- None"]),
+                  ].join("\n"),
+                );
+              }}
+              className="flex w-full items-center justify-center gap-2 rounded-sharp bg-brass px-5 py-4 text-sm font-semibold uppercase tracking-[0.14em] text-noir-base transition-all duration-300 hover:bg-brass-accent hover:shadow-glow"
+            >
+              <Copy className="h-4 w-4" />
+              Copy Receipt
+            </button>
+
+            <button
+              onClick={() => navigate(`/submit?mode=${mode}`)}
+              className="flex w-full items-center justify-center gap-2 rounded-sharp border border-white/15 px-5 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground transition-all duration-300 hover:border-white/30 hover:text-foreground"
+            >
+              <Search className="h-4 w-4" />
+              New Investigation
+            </button>
+          </aside>
         </div>
       </main>
     </div>

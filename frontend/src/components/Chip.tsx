@@ -8,16 +8,16 @@ interface ChipProps {
 }
 
 const variants = {
-  default: "bg-chip text-chip-foreground",
-  success: "bg-primary/15 text-primary",
-  warning: "bg-warning/15 text-warning",
-  danger: "bg-destructive/15 text-destructive",
+  default: "bg-chip text-chip-foreground border border-white/10",
+  success: "chip-safe",
+  warning: "chip-warning",
+  danger: "chip-danger",
 };
 
 export const Chip = ({ children, variant = "default", className }: ChipProps) => {
   return (
     <span className={cn(
-      "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider",
+      "inline-flex items-center gap-1.5 px-3 py-1 rounded-sharp text-xs font-semibold uppercase tracking-wider",
       variants[variant],
       className
     )}>
