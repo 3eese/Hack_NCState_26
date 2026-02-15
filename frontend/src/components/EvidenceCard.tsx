@@ -16,19 +16,19 @@ export const EvidenceCard = ({ title, domain, snippet, url, className }: Evidenc
       target="_blank"
       rel="noopener noreferrer"
       className={cn(
-        "block rounded-lg border border-border bg-card p-4 transition-all hover:border-primary/30 hover:glow-primary group",
+        "group block rounded-sharp border border-white/10 bg-noir-card p-4 transition-all duration-300 hover:border-brass/45 hover:shadow-noir-lg",
         className
       )}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-foreground truncate group-hover:text-primary transition-colors">
+          <p className="truncate text-sm font-semibold text-foreground transition-colors group-hover:text-brass">
             {title}
           </p>
-          <p className="text-xs text-primary/70 mt-0.5 font-medium">{domain}</p>
-          <p className="text-xs text-muted-foreground mt-2 line-clamp-2 leading-relaxed">{snippet}</p>
+          <p className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground">{domain}</p>
+          <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{snippet}</p>
         </div>
-        <ExternalLink className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5 group-hover:text-primary transition-colors" />
+        <ExternalLink className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-brass" />
       </div>
     </a>
   );
